@@ -1,0 +1,92 @@
+import time
+from typing import List, Optional, Dict, Any
+try:
+    from app.repositories.resume_repository import ResumeRepository
+    from app.services.resume_parser import ResumeParser
+    from app.schemas.resume import ResumeCreate, ResumeUpdate
+except ImportError:
+    from backend.app.repositories.resume_repository import ResumeRepository
+    from backend.app.services.resume_parser import ResumeParser
+    from backend.app.schemas.resume import ResumeCreate, ResumeUpdate
+
+class ResumeService:
+    def __init__(self):
+        self.repository = ResumeRepository()
+        self.parser = ResumeParser()
+
+    def get_user_resumes(self, user_id: str) -> List[Dict[str, Any]]:
+        resumes = self.repository.get_user_resumes(user_id)
+        for r in resumes:
+            name = r.get("name", "")
+            if "(" in name and ")" in name:
+                r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
+            else:
+                r["resume_type"] = "General"
+            
+            # Generate signed URL for private bucket access
+            if r.get("file_path"):
+                r["file_url"] = self.repository.get_signed_url("resumes", r["file_path"])
+        return resumes
+
+    def get_resume_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        r = self.repository.get_resume_by_id(resume_id, user_id)
+        if r:
+            name = r.get("name", "")
+            if "(" in name and ")" in name:
+                r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
+            else:
+                r["resume_type"] = "General"
+            
+            if r.get("file_path"):
+                r["file_url"] = self.repository.get_signed_url("resumes", r["file_path"])
+        return r
+
+    def create_resume(self, user_id: str, resume_data: ResumeCreate) -> Dict[str, Any]:
+        data = resume_data.model_dump()
+        resume_type = data.pop('resume_type', 'General')
+        if resume_type and resume_type != "General" and f"({resume_type})" not in data.get("name", ""):
+            data["name"] = f"{data.get('name', '')} ({resume_type})"
+        created = self.repository.create_resume(user_id, data)
+        created["resume_type"] = resume_type
+        return created
+
+    def upload_resume_file(self, user_id: str, file_bytes: bytes, filename: str, resume_type: str = "General") -> Dict[str, Any]:
+        ext = filename.split('.')[-1].lower() if '.' in filename else 'pdf'
+        file_path = f"{user_id}/{int(time.time() * 1000)}.{ext}"
+        content_type = "application/pdf" if ext == "pdf" else ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == "docx" else "application/octet-stream")
+        
+        public_url = self.repository.upload_file_to_storage("resumes", file_path, file_bytes, content_type)
+        
+        parsed_info = self.parser.parse_resume_content(file_bytes, ext)
+        
+        existing_resumes = self.repository.get_user_resumes(user_id)
+        is_primary = len(existing_resumes) == 0
+        
+        raw_name = filename.rsplit('.', 1)[0]
+        display_name = f"{raw_name} ({resume_type})" if (resume_type and resume_type != "General") else raw_name
+        
+        resume_data = {
+            "name": display_name,
+            "file_url": public_url,
+            "file_path": file_path,
+            "file_type": ext,
+            "file_size": len(file_bytes),
+            "is_primary": is_primary,
+            "content_text": parsed_info.get("cleaned_text") or parsed_info.get("raw_text"),
+            "skills": parsed_info.get("extracted_skills", []),
+            "parsed_data": parsed_info
+        }
+        created = self.repository.create_resume(user_id, resume_data)
+        created["resume_type"] = resume_type
+        return created
+
+
+    def set_primary_resume(self, resume_id: str, user_id: str) -> bool:
+        return self.repository.set_primary_resume(resume_id, user_id)
+
+    def delete_resume(self, resume_id: str, user_id: str) -> bool:
+        return self.repository.delete_resume(resume_id, user_id)
+
+    def parse_resume_content(self, file_content: bytes, filename: str) -> Dict[str, Any]:
+        return self.parser.parse_resume_content(file_content, filename)
+

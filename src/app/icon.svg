@@ -1,0 +1,20 @@
+<svg width="32" height="32" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="jtFaviconBg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="50%" stop-color="#312e81" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+    <filter id="jtGlitchGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="-0.8" dy="-0.4" stdDeviation="0.4" flood-color="#06b6d4" flood-opacity="0.9" />
+      <feDropShadow dx="0.8" dy="0.4" stdDeviation="0.4" flood-color="#ef4444" flood-opacity="0.9" />
+    </filter>
+  </defs>
+  <rect width="36" height="36" rx="10" fill="url(#jtFaviconBg)" />
+  <rect x="0.5" y="0.5" width="35" height="35" rx="9.5" stroke="rgba(255, 255, 255, 0.2)" stroke-width="1" />
+  <g filter="url(#jtGlitchGlow)">
+    <text x="18" y="24" font-family="'Inter', system-ui, -apple-system, sans-serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="-0.8px">
+      JT
+    </text>
+  </g>
+</svg>
