@@ -5,8 +5,12 @@ sys.path.insert(0, 'backend')
 
 from fastapi.testclient import TestClient
 from app.main import app
+from app.config import settings
+
+settings.SUPABASE_JWT_SECRET = "secret"
 
 client = TestClient(app)
+
 
 # Create a mock valid Supabase JWT token with a valid UUID
 valid_uuid = "c56a4180-65aa-42ec-a945-5fd21dec0538"
@@ -49,7 +53,8 @@ except Exception as e:
 print("\n==============================================")
 print("TEST 4: Invalid non-UUID token format handling (Expect 401)")
 print("==============================================")
-invalid_jwt = jwt.encode({"sub": "invalid_not_uuid"}, "secret", algorithm="HS256")
+invalid_jwt = jwt.encode({"sub": "invalid_not_uuid", "aud": "authenticated"}, "secret", algorithm="HS256")
+
 r4 = client.get("/api/py/jobs", headers={"Authorization": f"Bearer {invalid_jwt}"})
 print("STATUS (expect 401):", r4.status_code)
 print("RESPONSE:", r4.json())

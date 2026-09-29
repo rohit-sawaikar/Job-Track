@@ -1,7 +1,8 @@
 import uuid
 from fastapi import Header, HTTPException, Depends, status
-from typing import Optional
+from typing import Optional, Dict, Any
 import jwt
+from jwt import PyJWKClient, PyJWKClientError
 try:
     from app.config import settings
 except ImportError:
@@ -21,12 +22,24 @@ def validate_uuid(val: Optional[str]) -> bool:
     except ValueError:
         return False
 
+# Cache PyJWKClient instances per JWKS URL
+_jwk_clients: Dict[str, PyJWKClient] = {}
+
+def _get_jwk_client(jwks_url: str) -> PyJWKClient:
+    if jwks_url not in _jwk_clients:
+        _jwk_clients[jwks_url] = PyJWKClient(jwks_url, cache_keys=True)
+    return _jwk_clients[jwks_url]
+
+ALLOWED_ASYMMETRIC_ALGORITHMS = {"ES256", "RS256"}
+ALLOWED_SYMMETRIC_ALGORITHMS = {"HS256"}
+
 async def get_current_user(
     authorization: Optional[str] = Header(None),
     x_user_id: Optional[str] = Header(None)
 ) -> CurrentUser:
     """
     Validates Authorization header (Bearer token) and derives authenticated user ID from token sub.
+    Supports asymmetric JWTs (ES256/RS256 via Supabase JWKS) and legacy symmetric JWTs (HS256).
     If x-user-id header is provided, verifies that it matches the verified JWT user ID.
     Validates that user_id is a valid UUID string to prevent database syntax errors.
     """
@@ -38,10 +51,39 @@ async def get_current_user(
 
     token = authorization.replace("Bearer ", "").strip()
     try:
-        if settings.SUPABASE_JWT_SECRET:
-            payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+
+        if not alg:
+            raise ValueError("Token header missing 'alg' parameter")
+
+        if alg in ALLOWED_ASYMMETRIC_ALGORITHMS:
+            supabase_url = (getattr(settings, "SUPABASE_URL", "") or getattr(settings, "NEXT_PUBLIC_SUPABASE_URL", "")).strip()
+            if not supabase_url:
+                raise ValueError("Supabase URL is not configured for JWKS asymmetric token verification")
+
+            jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+            jwk_client = _get_jwk_client(jwks_url)
+            signing_key = jwk_client.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                audience="authenticated"
+            )
+        elif alg in ALLOWED_SYMMETRIC_ALGORITHMS:
+            secret = getattr(settings, "SUPABASE_JWT_SECRET", "")
+            if not secret:
+                raise ValueError(f"{alg} algorithm requires SUPABASE_JWT_SECRET to be configured")
+            payload = jwt.decode(
+                token,
+                secret,
+                algorithms=[alg],
+                audience="authenticated"
+            )
         else:
-            payload = jwt.decode(token, options={"verify_signature": False})
+            raise ValueError(f"Unsupported or disallowed algorithm '{alg}'")
+
 
         token_user_id = payload.get("sub") or payload.get("user_id")
         email = payload.get("email")
@@ -57,13 +99,14 @@ async def get_current_user(
             detail="Authentication token contains no valid user identity (sub)"
         )
 
-    if x_user_id and x_user_id != token_user_id:
+    if x_user_id and isinstance(x_user_id, str) and x_user_id != token_user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Security violation: x-user-id header does not match verified JWT identity"
         )
 
-    target_user_id = token_user_id
+
+    target_user_id = str(token_user_id)
 
     if not validate_uuid(target_user_id):
         raise HTTPException(
@@ -72,5 +115,6 @@ async def get_current_user(
         )
 
     return CurrentUser(user_id=target_user_id, email=email)
+
 
 
