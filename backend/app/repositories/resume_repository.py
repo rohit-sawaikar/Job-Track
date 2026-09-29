@@ -5,8 +5,7 @@ from typing import List, Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 ALLOWED_RESUME_COLUMNS = {
-    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'is_primary', 'created_at', 'updated_at',
-    'content_text', 'skills', 'parsed_data'
+    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'resume_type', 'is_primary', 'created_at', 'updated_at'
 }
 
 class ResumeRepository(BaseRepository):

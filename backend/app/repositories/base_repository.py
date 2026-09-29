@@ -70,13 +70,27 @@ class BaseRepository:
     def get_signed_url(self, bucket_name: str, file_path: str, expires_in: int = 3600) -> str:
         """Generates a temporary signed URL for private bucket file viewing/downloading."""
         try:
+            if not file_path:
+                return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}"
             res = self.client.storage.from_(bucket_name).create_signed_url(file_path, expires_in)
-            if isinstance(res, dict) and "signedUrl" in res:
-                return res["signedUrl"]
-            elif isinstance(res, str):
+            if isinstance(res, str):
+                if res.startswith("http"):
+                    return res
+                elif res.startswith("/"):
+                    return f"{self.supabase_url}/storage/v1{res}"
                 return res
-            elif hasattr(res, "get"):
-                return res.get("signedUrl", f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}")
+            elif isinstance(res, dict) or hasattr(res, "get"):
+                signed = (
+                    res.get("signedUrl")
+                    or res.get("signedURL")
+                    or res.get("signed_url")
+                )
+                if signed and isinstance(signed, str):
+                    if signed.startswith("http"):
+                        return signed
+                    elif signed.startswith("/"):
+                        return f"{self.supabase_url}/storage/v1{signed}"
+                    return signed
             return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}"
         except Exception as e:
             logger.warning(f"Signed URL creation fallback for {bucket_name}/{file_path}: {e}")

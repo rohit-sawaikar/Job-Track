@@ -44,6 +44,7 @@ export default function ResumesPage() {
   const { user } = useAuth();
 
   const fetchResumes = useCallback(async () => {
+    if (!user) return;
     try {
       const data = await apiClient.getResumes();
       if (data) setResumes(data as Resume[]);
@@ -52,7 +53,7 @@ export default function ResumesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchResumes();

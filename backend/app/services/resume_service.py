@@ -15,31 +15,54 @@ class ResumeService:
         self.parser = ResumeParser()
 
     def get_user_resumes(self, user_id: str) -> List[Dict[str, Any]]:
-        resumes = self.repository.get_user_resumes(user_id)
-        for r in resumes:
-            name = r.get("name", "")
-            if "(" in name and ")" in name:
-                r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
-            else:
-                r["resume_type"] = "General"
+        try:
+            resumes = self.repository.get_user_resumes(user_id)
+            if not resumes:
+                return []
             
-            # Generate signed URL for private bucket access
-            if r.get("file_path"):
-                r["file_url"] = self.repository.get_signed_url("resumes", r["file_path"])
-        return resumes
+            for r in resumes:
+                if not isinstance(r, dict):
+                    continue
+                name = str(r.get("name") or "")
+                if "(" in name and ")" in name:
+                    r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
+                else:
+                    r["resume_type"] = r.get("resume_type") or "General"
+                
+                # Generate signed URL for private bucket access if file_path is present
+                file_path = r.get("file_path")
+                if file_path:
+                    try:
+                        signed_url = self.repository.get_signed_url("resumes", file_path)
+                        if signed_url:
+                            r["file_url"] = signed_url
+                    except Exception as url_err:
+                        pass
+            return resumes
+        except Exception as e:
+            return []
 
     def get_resume_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        r = self.repository.get_resume_by_id(resume_id, user_id)
-        if r:
-            name = r.get("name", "")
-            if "(" in name and ")" in name:
-                r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
-            else:
-                r["resume_type"] = "General"
-            
-            if r.get("file_path"):
-                r["file_url"] = self.repository.get_signed_url("resumes", r["file_path"])
-        return r
+        try:
+            r = self.repository.get_resume_by_id(resume_id, user_id)
+            if r and isinstance(r, dict):
+                name = str(r.get("name") or "")
+                if "(" in name and ")" in name:
+                    r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
+                else:
+                    r["resume_type"] = r.get("resume_type") or "General"
+                
+                file_path = r.get("file_path")
+                if file_path:
+                    try:
+                        signed_url = self.repository.get_signed_url("resumes", file_path)
+                        if signed_url:
+                            r["file_url"] = signed_url
+                    except Exception:
+                        pass
+            return r
+        except Exception:
+            return None
 
     def create_resume(self, user_id: str, resume_data: ResumeCreate) -> Dict[str, Any]:
         data = resume_data.model_dump()
