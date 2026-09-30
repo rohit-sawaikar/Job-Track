@@ -4,7 +4,7 @@ try:
     from app.api.deps import get_current_user, CurrentUser
     from app.schemas.resume import ResumeCreate, ResumeUpdate
     from app.schemas.analysis import AnalysisCreateRequest
-    from app.schemas.profile import ProfileUpdate
+    from app.schemas.profile import ProfileUpdate, ProfileLinkCreate, ProfileLinkUpdate
     from app.services.resume_service import ResumeService
     from app.services.analysis_service import AnalysisService
     from app.services.profile_service import ProfileService
@@ -12,7 +12,7 @@ except ImportError:
     from backend.app.api.deps import get_current_user, CurrentUser
     from backend.app.schemas.resume import ResumeCreate, ResumeUpdate
     from backend.app.schemas.analysis import AnalysisCreateRequest
-    from backend.app.schemas.profile import ProfileUpdate
+    from backend.app.schemas.profile import ProfileUpdate, ProfileLinkCreate, ProfileLinkUpdate
     from backend.app.services.resume_service import ResumeService
     from backend.app.services.analysis_service import AnalysisService
     from backend.app.services.profile_service import ProfileService
@@ -89,4 +89,28 @@ async def upload_avatar(
         return profile_service.upload_profile_photo(current_user.id, content, file.filename or "avatar.jpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Avatar upload failed: {str(e)}")
+
+# Custom Links Router Endpoints
+@profile_router.get("/links", response_model=List[Dict[str, Any]])
+async def get_custom_links(current_user: CurrentUser = Depends(get_current_user)):
+    return profile_service.get_custom_links(current_user.id)
+
+@profile_router.post("/links", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+async def create_custom_link(link_data: ProfileLinkCreate, current_user: CurrentUser = Depends(get_current_user)):
+    return profile_service.create_custom_link(current_user.id, link_data.name, link_data.url)
+
+@profile_router.put("/links/{link_id}", response_model=Dict[str, Any])
+async def update_custom_link(link_id: str, link_data: ProfileLinkUpdate, current_user: CurrentUser = Depends(get_current_user)):
+    updated = profile_service.update_custom_link(link_id, current_user.id, link_data.name or "", link_data.url or "")
+    if not updated:
+        raise HTTPException(status_code=404, detail="Link not found")
+    return updated
+
+@profile_router.delete("/links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_custom_link(link_id: str, current_user: CurrentUser = Depends(get_current_user)):
+    success = profile_service.delete_custom_link(link_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Link not found")
+    return None
+
 

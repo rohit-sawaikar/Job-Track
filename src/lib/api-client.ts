@@ -217,6 +217,51 @@ class PythonApiClient {
     return res.json();
   }
 
+  async getCustomLinks() {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/py/profile/links', { headers });
+    if (!res.ok) throw new Error('Failed to fetch custom links');
+    return res.json();
+  }
+
+  async addCustomLink(data: { name: string; url: string }) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/py/profile/links', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to add custom link');
+    }
+    return res.json();
+  }
+
+  async updateCustomLink(id: string, data: { name?: string; url?: string }) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/py/profile/links/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to update custom link');
+    }
+    return res.json();
+  }
+
+  async deleteCustomLink(id: string) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/py/profile/links/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) throw new Error('Failed to delete custom link');
+    return true;
+  }
+
   // Analyses REST Endpoints
   async getAnalyses() {
     const headers = await this.getAuthHeaders();

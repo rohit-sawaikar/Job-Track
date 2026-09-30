@@ -72,5 +72,18 @@ class ProfileService:
             return updated
         return {"id": user_id, "profile_photo_url": fresh_signed_url}
 
+    def get_custom_links(self, user_id: str) -> list:
+        return self.repository.get_custom_links(user_id)
+
+    def create_custom_link(self, user_id: str, name: str, url: str) -> dict:
+        return self.repository.create_custom_link(user_id, name, url)
+
+    def update_custom_link(self, link_id: str, user_id: str, name: str, url: str) -> Optional[dict]:
+        return self.repository.update_custom_link(link_id, user_id, name, url)
+
+    def delete_custom_link(self, link_id: str, user_id: str) -> bool:
+        return self.repository.delete_custom_link(link_id, user_id)
+
+
 
 

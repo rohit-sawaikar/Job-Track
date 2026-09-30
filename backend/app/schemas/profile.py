@@ -35,3 +35,20 @@ class ProfileResponse(BaseModel):
     career_interests: Optional[str] = None
     is_profile_complete: bool = False
     created_at: Optional[str] = None
+
+class ProfileLinkCreate(BaseModel):
+    name: str
+    url: str
+
+class ProfileLinkUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+
+class ProfileLinkResponse(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    url: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+

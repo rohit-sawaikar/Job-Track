@@ -40,3 +40,73 @@ class ProfileRepository(BaseRepository):
     def update_profile(self, user_id: str, profile_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         res = self.client.from_('profiles').update(profile_data).eq('id', user_id).execute()
         return res.data[0] if res.data else None
+
+    # Custom Links (profile_links table with fallback to custom_links column in profiles table)
+    def get_custom_links(self, user_id: str) -> List[Dict[str, Any]]:
+        try:
+            res = self.client.from_('profile_links').select('*').eq('user_id', user_id).order('created_at').execute()
+            if res.data is not None:
+                return res.data
+        except Exception as e:
+            logger.warning(f"Could not fetch from profile_links: {e}")
+        
+        try:
+            p = self.get_profile(user_id)
+            if p and isinstance(p, dict):
+                return p.get("custom_links") or []
+        except Exception:
+            pass
+        return []
+
+    def create_custom_link(self, user_id: str, name: str, url: str) -> Dict[str, Any]:
+        payload = {"user_id": user_id, "name": name, "url": url}
+        try:
+            res = self.client.from_('profile_links').insert(payload).execute()
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            logger.warning(f"Could not insert into profile_links: {e}")
+        
+        import uuid
+        new_link = {"id": str(uuid.uuid4()), "user_id": user_id, "name": name, "url": url}
+        existing = self.get_custom_links(user_id)
+        existing.append(new_link)
+        self.update_profile(user_id, {"custom_links": existing})
+        return new_link
+
+    def update_custom_link(self, link_id: str, user_id: str, name: str, url: str) -> Optional[Dict[str, Any]]:
+        try:
+            res = self.client.from_('profile_links').update({"name": name, "url": url}).eq('id', link_id).eq('user_id', user_id).execute()
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            logger.warning(f"Could not update profile_links: {e}")
+        
+        existing = self.get_custom_links(user_id)
+        updated_link = None
+        for link in existing:
+            if str(link.get("id")) == str(link_id):
+                link["name"] = name
+                link["url"] = url
+                updated_link = link
+                break
+        if updated_link:
+            self.update_profile(user_id, {"custom_links": existing})
+            return updated_link
+        return None
+
+    def delete_custom_link(self, link_id: str, user_id: str) -> bool:
+        try:
+            res = self.client.from_('profile_links').delete().eq('id', link_id).eq('user_id', user_id).execute()
+            if res.data:
+                return True
+        except Exception as e:
+            logger.warning(f"Could not delete from profile_links: {e}")
+        
+        existing = self.get_custom_links(user_id)
+        filtered = [l for l in existing if str(l.get("id")) != str(link_id)]
+        if len(filtered) != len(existing):
+            self.update_profile(user_id, {"custom_links": filtered})
+            return True
+        return False
+

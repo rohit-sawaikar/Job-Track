@@ -104,14 +104,29 @@ CREATE TABLE IF NOT EXISTS resume_analyses (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ============================================================
+-- Profile Links (Custom Links)
+CREATE TABLE IF NOT EXISTS profile_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Row Level Security
--- ============================================================
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE resumes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE resume_analyses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profile_links ENABLE ROW LEVEL SECURITY;
+
+-- Profile Links policies
+CREATE POLICY "Users can view own profile_links" ON profile_links FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own profile_links" ON profile_links FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own profile_links" ON profile_links FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own profile_links" ON profile_links FOR DELETE USING (auth.uid() = user_id);
 
 -- Profiles: users can read/update only their own profile
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
