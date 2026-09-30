@@ -150,28 +150,48 @@ export default function ResumesPage() {
     fetchResumes();
   };
 
-  const handleView = (r: Resume) => {
-    if (!r.file_url) {
-      toast.error('Resume view URL unavailable');
-      return;
-    }
+  const handleView = async (r: Resume) => {
     const ext = (r.file_type || '').toLowerCase();
-    if (ext === 'pdf' || r.file_url.toLowerCase().includes('.pdf')) {
-      window.open(r.file_url, '_blank', 'noopener,noreferrer');
-    } else {
+    if (ext === 'docx' || (r.name || '').toLowerCase().endsWith('.docx')) {
       toast('DOCX files cannot be previewed natively in browser. Downloading file...', { icon: 'ℹ️' });
       handleDownload(r);
+      setMenuOpen(null);
+      return;
+    }
+
+    try {
+      const res = await apiClient.getResumeViewUrl(r.id);
+      const viewUrl = res?.url || r.file_url;
+      if (viewUrl) {
+        window.open(viewUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        toast.error('Resume view URL unavailable');
+      }
+    } catch {
+      if (r.file_url) {
+        window.open(r.file_url, '_blank', 'noopener,noreferrer');
+      } else {
+        toast.error('Failed to retrieve resume preview link');
+      }
     }
     setMenuOpen(null);
   };
 
   const handleDownload = async (r: Resume) => {
-    const targetUrl = r.download_url || r.file_url;
-    if (!targetUrl) {
-      toast.error('Download link unavailable');
-      return;
-    }
     try {
+      let targetUrl = r.download_url || r.file_url;
+      try {
+        const res = await apiClient.getResumeDownloadUrl(r.id);
+        if (res?.url) targetUrl = res.url;
+      } catch {
+        // Fall back to pre-existing download_url or file_url
+      }
+
+      if (!targetUrl) {
+        toast.error('Download link unavailable');
+        return;
+      }
+
       const res = await fetch(targetUrl);
       const blob = await res.blob();
       const blobUrl = window.URL.createObjectURL(blob);
@@ -186,7 +206,8 @@ export default function ResumesPage() {
       window.URL.revokeObjectURL(blobUrl);
       toast.success(`Downloading ${a.download}`);
     } catch {
-      window.open(targetUrl, '_blank');
+      const fallbackUrl = r.download_url || r.file_url;
+      if (fallbackUrl) window.open(fallbackUrl, '_blank');
     }
     setMenuOpen(null);
   };

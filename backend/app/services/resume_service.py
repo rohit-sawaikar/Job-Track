@@ -106,9 +106,16 @@ class ResumeService:
         raw_name = filename.rsplit('.', 1)[0]
         display_name = f"{raw_name} ({resume_type})" if (resume_type and resume_type != "General") else raw_name
         
+        clean_fn = raw_name.replace("/", "_").strip() or "resume"
+        if not clean_fn.lower().endswith(f".{ext}"):
+            clean_fn = f"{clean_fn}.{ext}"
+
+        inline_url = self.repository.get_signed_url("resumes", file_path, download=False)
+        download_url = self.repository.get_signed_url("resumes", file_path, download=True, filename=clean_fn)
+
         resume_data = {
             "name": display_name,
-            "file_url": public_url,
+            "file_url": inline_url or public_url,
             "file_path": file_path,
             "file_type": ext,
             "file_size": len(file_bytes),
@@ -119,6 +126,8 @@ class ResumeService:
         }
         created = self.repository.create_resume(user_id, resume_data)
         created["resume_type"] = resume_type
+        created["file_url"] = inline_url or public_url
+        created["download_url"] = download_url or public_url
         return created
 
 

@@ -152,6 +152,20 @@ class PythonApiClient {
     return res.json();
   }
 
+  async getResumeViewUrl(id: string) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/py/resumes/${id}/view`, { headers });
+    if (!res.ok) throw new Error('Failed to get resume view URL');
+    return res.json();
+  }
+
+  async getResumeDownloadUrl(id: string) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/py/resumes/${id}/download`, { headers });
+    if (!res.ok) throw new Error('Failed to get resume download URL');
+    return res.json();
+  }
+
   async setPrimaryResume(id: string) {
     const headers = await this.getAuthHeaders();
     const res = await fetch(`/api/py/resumes/${id}/primary`, {
