@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
 from typing import List, Dict, Any, Optional
 try:
     from app.api.deps import get_current_user, CurrentUser
@@ -41,25 +41,65 @@ async def upload_resume(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume upload failed: {str(e)}")
 
-@resumes_router.get("/{resume_id}/view", response_model=Dict[str, Any])
+@resumes_router.get("/{resume_id}/view")
 async def view_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
     resume = resume_service.get_resume_by_id(resume_id, current_user.id)
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    url = resume.get("file_url")
-    if not url:
-        raise HTTPException(status_code=404, detail="Resume view URL unavailable")
-    return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+    file_path = resume.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Resume file path missing")
+    
+    file_bytes = resume_service.repository.download_file_from_storage("resumes", file_path)
+    if not file_bytes:
+        url = resume.get("file_url")
+        if not url:
+            raise HTTPException(status_code=404, detail="Resume view URL unavailable")
+        return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
 
-@resumes_router.get("/{resume_id}/download", response_model=Dict[str, Any])
+    file_type = (resume.get("file_type") or "pdf").lower()
+    media_type = "application/pdf" if file_type == "pdf" else ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_type == "docx" else "application/octet-stream")
+    
+    raw_name = resume.get("name") or "resume"
+    clean_fn = raw_name.replace("/", "_").strip()
+    if not clean_fn.lower().endswith(f".{file_type}"):
+        clean_fn = f"{clean_fn}.{file_type}"
+
+    headers = {
+        "Content-Disposition": f"inline; filename=\"{clean_fn}\"",
+        "Content-Type": media_type,
+    }
+    return Response(content=file_bytes, media_type=media_type, headers=headers)
+
+@resumes_router.get("/{resume_id}/download")
 async def download_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
     resume = resume_service.get_resume_by_id(resume_id, current_user.id)
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    url = resume.get("download_url") or resume.get("file_url")
-    if not url:
-        raise HTTPException(status_code=404, detail="Resume download URL unavailable")
-    return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+    file_path = resume.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Resume file path missing")
+    
+    file_bytes = resume_service.repository.download_file_from_storage("resumes", file_path)
+    if not file_bytes:
+        url = resume.get("download_url") or resume.get("file_url")
+        if not url:
+            raise HTTPException(status_code=404, detail="Resume download URL unavailable")
+        return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+
+    file_type = (resume.get("file_type") or "pdf").lower()
+    media_type = "application/pdf" if file_type == "pdf" else ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_type == "docx" else "application/octet-stream")
+    
+    raw_name = resume.get("name") or "resume"
+    clean_fn = raw_name.replace("/", "_").strip()
+    if not clean_fn.lower().endswith(f".{file_type}"):
+        clean_fn = f"{clean_fn}.{file_type}"
+
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{clean_fn}\"",
+        "Content-Type": media_type,
+    }
+    return Response(content=file_bytes, media_type=media_type, headers=headers)
 
 @resumes_router.post("/{resume_id}/primary", response_model=Dict[str, Any])
 async def set_primary_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):

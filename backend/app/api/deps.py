@@ -1,5 +1,5 @@
 import uuid
-from fastapi import Header, HTTPException, Depends, status
+from fastapi import Header, Query, HTTPException, Depends, status
 from typing import Optional, Dict, Any
 import jwt
 from jwt import PyJWKClient, PyJWKClientError
@@ -35,23 +35,29 @@ ALLOWED_SYMMETRIC_ALGORITHMS = {"HS256"}
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None)
+    x_user_id: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
 ) -> CurrentUser:
     """
-    Validates Authorization header (Bearer token) and derives authenticated user ID from token sub.
+    Validates Authorization header (Bearer token) or token query parameter and derives authenticated user ID from token sub.
     Supports asymmetric JWTs (ES256/RS256 via Supabase JWKS) and legacy symmetric JWTs (HS256).
     If x-user-id header is provided, verifies that it matches the verified JWT user ID.
     Validates that user_id is a valid UUID string to prevent database syntax errors.
     """
-    if not authorization or not authorization.startswith("Bearer "):
+    auth_token = None
+    if authorization and authorization.startswith("Bearer "):
+        auth_token = authorization.replace("Bearer ", "").strip()
+    elif token and isinstance(token, str) and token.strip():
+        auth_token = token.strip()
+
+    if not auth_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header"
+            detail="Missing or invalid Authorization header or token parameter"
         )
 
-    token = authorization.replace("Bearer ", "").strip()
     try:
-        header = jwt.get_unverified_header(token)
+        header = jwt.get_unverified_header(auth_token)
         alg = header.get("alg")
 
         if not alg:
@@ -64,9 +70,9 @@ async def get_current_user(
 
             jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
             jwk_client = _get_jwk_client(jwks_url)
-            signing_key = jwk_client.get_signing_key_from_jwt(token)
+            signing_key = jwk_client.get_signing_key_from_jwt(auth_token)
             payload = jwt.decode(
-                token,
+                auth_token,
                 signing_key.key,
                 algorithms=[alg],
                 audience="authenticated"
@@ -76,7 +82,7 @@ async def get_current_user(
             if not secret:
                 raise ValueError(f"{alg} algorithm requires SUPABASE_JWT_SECRET to be configured")
             payload = jwt.decode(
-                token,
+                auth_token,
                 secret,
                 algorithms=[alg],
                 audience="authenticated"

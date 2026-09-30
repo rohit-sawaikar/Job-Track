@@ -160,13 +160,13 @@ export default function ResumesPage() {
     }
 
     try {
-      const res = await apiClient.getResumeViewUrl(r.id);
-      const viewUrl = res?.url || r.file_url;
-      if (viewUrl) {
-        window.open(viewUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        toast.error('Resume view URL unavailable');
-      }
+      const token = await apiClient.getAuthToken();
+      const viewEndpoint = token 
+        ? `/api/py/resumes/${r.id}/view?token=${encodeURIComponent(token)}`
+        : `/api/py/resumes/${r.id}/view`;
+
+      console.log('[Resume View] resume id:', r.id);
+      window.open(viewEndpoint, '_blank', 'noopener,noreferrer');
     } catch {
       if (r.file_url) {
         window.open(r.file_url, '_blank', 'noopener,noreferrer');
@@ -179,20 +179,21 @@ export default function ResumesPage() {
 
   const handleDownload = async (r: Resume) => {
     try {
-      let targetUrl = r.download_url || r.file_url;
-      try {
-        const res = await apiClient.getResumeDownloadUrl(r.id);
-        if (res?.url) targetUrl = res.url;
-      } catch {
-        // Fall back to pre-existing download_url or file_url
+      const token = await apiClient.getAuthToken();
+      let downloadEndpoint = token 
+        ? `/api/py/resumes/${r.id}/download?token=${encodeURIComponent(token)}`
+        : `/api/py/resumes/${r.id}/download`;
+
+      if (!downloadEndpoint) {
+        downloadEndpoint = r.download_url || r.file_url || '';
       }
 
-      if (!targetUrl) {
+      if (!downloadEndpoint) {
         toast.error('Download link unavailable');
         return;
       }
 
-      const res = await fetch(targetUrl);
+      const res = await fetch(downloadEndpoint);
       const blob = await res.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');

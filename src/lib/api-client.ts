@@ -3,6 +3,12 @@ import { createClient } from '@/lib/supabase/client';
 class PythonApiClient {
   private baseUrl = '';
 
+  async getAuthToken(): Promise<string | null> {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
+  }
+
   private async getAuthHeaders(): Promise<Record<string, string>> {
     const supabase = createClient();
     const { data: { session } } = await supabase.auth.getSession();
