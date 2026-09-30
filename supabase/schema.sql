@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   preferred_locations TEXT[] DEFAULT '{}',
   work_preference TEXT,
   career_interests TEXT,
+  custom_links JSONB DEFAULT '[]'::jsonb,
   is_profile_complete BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

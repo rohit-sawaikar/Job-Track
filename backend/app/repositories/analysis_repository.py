@@ -32,14 +32,35 @@ class AnalysisRepository(BaseRepository):
             return []
 
 
+BASE_PROFILE_COLUMNS = {
+    'first_name', 'last_name', 'phone', 'profile_photo_url',
+    'linkedin', 'github', 'portfolio', 'is_profile_complete'
+}
+
 class ProfileRepository(BaseRepository):
     def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         res = self.client.from_('profiles').select('*').eq('id', user_id).single().execute()
         return res.data
 
     def update_profile(self, user_id: str, profile_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        res = self.client.from_('profiles').update(profile_data).eq('id', user_id).execute()
-        return res.data[0] if res.data else None
+        try:
+            res = self.client.from_('profiles').update(profile_data).eq('id', user_id).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            err_str = str(e)
+            if "PGRST204" in err_str or "column" in err_str.lower():
+                logger.warning(f"Profiles table missing extended columns. Retrying with base columns for user {user_id}: {e}")
+                base_data = {k: v for k, v in profile_data.items() if k in BASE_PROFILE_COLUMNS}
+                if base_data:
+                    try:
+                        res = self.client.from_('profiles').update(base_data).eq('id', user_id).execute()
+                        return res.data[0] if res.data else None
+                    except Exception as fallback_err:
+                        logger.error(f"Fallback update_profile failed for user {user_id}: {fallback_err}")
+                        raise fallback_err
+            logger.error(f"Failed to update profile for user {user_id}: {e}")
+            raise e
+
 
     # Custom Links (profile_links table with fallback to custom_links column in profiles table)
     def get_custom_links(self, user_id: str) -> List[Dict[str, Any]]:
@@ -69,9 +90,12 @@ class ProfileRepository(BaseRepository):
         
         import uuid
         new_link = {"id": str(uuid.uuid4()), "user_id": user_id, "name": name, "url": url}
-        existing = self.get_custom_links(user_id)
-        existing.append(new_link)
-        self.update_profile(user_id, {"custom_links": existing})
+        try:
+            existing = self.get_custom_links(user_id)
+            existing.append(new_link)
+            self.update_profile(user_id, {"custom_links": existing})
+        except Exception as fallback_err:
+            logger.warning(f"Fallback custom_links column update skipped: {fallback_err}. Please run database migration to add profile_links table.")
         return new_link
 
     def update_custom_link(self, link_id: str, user_id: str, name: str, url: str) -> Optional[Dict[str, Any]]:
@@ -91,7 +115,10 @@ class ProfileRepository(BaseRepository):
                 updated_link = link
                 break
         if updated_link:
-            self.update_profile(user_id, {"custom_links": existing})
+            try:
+                self.update_profile(user_id, {"custom_links": existing})
+            except Exception as fallback_err:
+                logger.warning(f"Fallback custom_links update skipped: {fallback_err}")
             return updated_link
         return None
 
@@ -106,7 +133,11 @@ class ProfileRepository(BaseRepository):
         existing = self.get_custom_links(user_id)
         filtered = [l for l in existing if str(l.get("id")) != str(link_id)]
         if len(filtered) != len(existing):
-            self.update_profile(user_id, {"custom_links": filtered})
+            try:
+                self.update_profile(user_id, {"custom_links": filtered})
+            except Exception as fallback_err:
+                logger.warning(f"Fallback custom_links delete update skipped: {fallback_err}")
             return True
         return False
+
 

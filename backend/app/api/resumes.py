@@ -75,6 +75,7 @@ async def get_profile(current_user: CurrentUser = Depends(get_current_user)):
     return profile
 
 @profile_router.put("", response_model=Dict[str, Any])
+@profile_router.post("", response_model=Dict[str, Any])
 async def update_profile(profile_data: ProfileUpdate, current_user: CurrentUser = Depends(get_current_user)):
     updated = profile_service.update_profile(current_user.id, profile_data)
     return updated or {"id": current_user.id}
