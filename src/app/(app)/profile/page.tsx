@@ -83,8 +83,10 @@ export default function ProfilePage() {
       const res = await apiClient.uploadAvatar(croppedFile);
       const rawUrl = res.profile_photo_url;
       if (rawUrl) {
-        // Ensure cache-busting timestamp is present so browser re-fetches image bytes immediately
-        const freshUrl = rawUrl.includes('?') ? rawUrl : `${rawUrl}?v=${Date.now()}`;
+        // Ensure cache-busting timestamp is present without stripping token query parameters
+        const freshUrl = rawUrl.includes('v=')
+          ? rawUrl
+          : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
         setPhotoPreview(freshUrl);
         updateProfileState({ profile_photo_url: freshUrl });
       }

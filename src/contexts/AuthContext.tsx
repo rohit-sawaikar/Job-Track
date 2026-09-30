@@ -50,14 +50,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile((prev) => (prev ? { ...prev, ...updatedFields } : null));
   }, []);
 
+  const resolveAvatarUrl = useCallback(async (photoUrlOrPath: string | null): Promise<string | null> => {
+    if (!photoUrlOrPath) return null;
+
+    // Preserve external URLs (e.g. Google OAuth profile images)
+    if (photoUrlOrPath.startsWith('http://') || photoUrlOrPath.startsWith('https://')) {
+      if (!photoUrlOrPath.includes('/storage/v1/object/') && !photoUrlOrPath.includes('avatars/')) {
+        return photoUrlOrPath;
+      }
+    }
+
+    // Extract clean storage object path
+    let path = photoUrlOrPath;
+    if (path.includes('/avatars/')) {
+      path = path.split('/avatars/')[1].split('?')[0];
+    } else {
+      path = path.split('?')[0];
+      if (path.startsWith('avatars/')) {
+        path = path.replace('avatars/', '');
+      }
+    }
+
+    try {
+      const { data, error } = await supabase.storage.from('avatars').createSignedUrl(path, 3600);
+      if (data?.signedUrl && !error) {
+        const separator = data.signedUrl.includes('?') ? '&' : '?';
+        return `${data.signedUrl}${separator}v=${Date.now()}`;
+      }
+    } catch {
+      // Fallback
+    }
+
+    return photoUrlOrPath;
+  }, [supabase]);
+
   const fetchProfile = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
-    setProfile(data);
-  }, [supabase]);
+
+    if (data) {
+      if (data.profile_photo_url) {
+        const resolvedUrl = await resolveAvatarUrl(data.profile_photo_url);
+        data.profile_photo_url = resolvedUrl;
+      }
+      setProfile(data);
+    } else {
+      setProfile(null);
+    }
+  }, [supabase, resolveAvatarUrl]);
 
   const refreshProfile = useCallback(async () => {
     if (user) await fetchProfile(user.id);
