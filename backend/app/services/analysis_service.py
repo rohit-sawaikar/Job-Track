@@ -5,36 +5,64 @@ from app.services.matching_engine import MatchingEngine
 from app.schemas.analysis import AnalysisCreateRequest, AnalysisResponse
 from typing import List, Dict, Any, Optional
 
+try:
+    from app.services.resume_parser import ResumeParser
+except ImportError:
+    from backend.app.services.resume_parser import ResumeParser
+
 class AnalysisService:
     def __init__(self):
         self.analysis_repo = AnalysisRepository()
         self.resume_repo = ResumeRepository()
         self.matching_engine = MatchingEngine()
+        self.parser = ResumeParser()
 
     def analyze_and_save(self, user_id: str, request: AnalysisCreateRequest) -> Dict[str, Any]:
+        # Validate job description
+        raw_jd = (request.raw_job_text or "").strip()
+        if not raw_jd:
+            raise HTTPException(status_code=400, detail="Job description text is required for analysis")
+
         # 1. Fetch target resume metadata & verify ownership
         resume = None
+        resume_text = ""
+        candidate_skills = []
+        candidate_name = "Candidate"
+
         if request.resume_id:
             resume = self.resume_repo.get_resume_by_id(request.resume_id, user_id)
             if not resume:
                 raise HTTPException(status_code=404, detail="Resume not found or access denied")
-        
-        resume_name = resume.get('name', 'Candidate Resume') if resume else 'Candidate Resume'
-        resume_text = (resume.get('content_text') if resume else None) or f"Resume: {resume_name}"
-        candidate_skills = (resume.get('skills') if resume else None) or []
-        if not candidate_skills and resume:
-            parsed = resume.get('parsed_data') or {}
-            candidate_skills = parsed.get('extracted_skills') or []
+            
+            # Fetch real resume file bytes from Supabase storage
+            file_path = resume.get("file_path")
+            file_type = (resume.get("file_type") or "pdf").lower()
+            if file_path:
+                try:
+                    file_bytes = self.resume_repo.download_file_from_storage("resumes", file_path)
+                    if file_bytes:
+                        parsed = self.parser.parse_resume_content(file_bytes, file_type)
+                        resume_text = parsed.get("cleaned_text") or parsed.get("raw_text") or ""
+                        candidate_skills = parsed.get("extracted_skills") or []
+                        if parsed.get("candidate_name") and parsed.get("candidate_name") != "Candidate":
+                            candidate_name = parsed.get("candidate_name")
+                except Exception as dl_err:
+                    print(f"Warning: Could not download/parse storage file for resume {request.resume_id}: {dl_err}")
 
-        # 2. Execute 2-stage matching engine in Python
+        resume_name = resume.get('name', 'Candidate Resume') if resume else 'Candidate Resume'
+        if not resume_text:
+            resume_text = f"Resume: {resume_name}"
+
+        # 2. Execute matching engine in Python
         analysis_data = self.matching_engine.analyze_resume_against_job(
             resume_text=resume_text,
             extracted_skills=candidate_skills,
             job_title=request.job_title or "Target Position",
             company=request.company or "Company",
-            job_description=request.raw_job_text,
+            job_description=raw_jd,
             required_skills=[],
-            preferred_skills=[]
+            preferred_skills=[],
+            candidate_name=candidate_name
         )
 
 

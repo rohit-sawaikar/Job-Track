@@ -29,13 +29,22 @@ class ResumeService:
                 else:
                     r["resume_type"] = r.get("resume_type") or "General"
                 
-                # Generate signed URL for private bucket access if file_path is present
+                # Generate signed URLs for private bucket access if file_path is present
                 file_path = r.get("file_path")
                 if file_path:
                     try:
-                        signed_url = self.repository.get_signed_url("resumes", file_path)
+                        clean_fn = name.replace("/", "_").strip() or "resume"
+                        file_ext = r.get("file_type") or "pdf"
+                        if not clean_fn.lower().endswith(f".{file_ext}"):
+                            clean_fn = f"{clean_fn}.{file_ext}"
+
+                        signed_url = self.repository.get_signed_url("resumes", file_path, download=False)
+                        download_url = self.repository.get_signed_url("resumes", file_path, download=True, filename=clean_fn)
+
                         if signed_url:
                             r["file_url"] = signed_url
+                        if download_url:
+                            r["download_url"] = download_url
                     except Exception as url_err:
                         pass
             return resumes
@@ -55,9 +64,18 @@ class ResumeService:
                 file_path = r.get("file_path")
                 if file_path:
                     try:
-                        signed_url = self.repository.get_signed_url("resumes", file_path)
+                        clean_fn = name.replace("/", "_").strip() or "resume"
+                        file_ext = r.get("file_type") or "pdf"
+                        if not clean_fn.lower().endswith(f".{file_ext}"):
+                            clean_fn = f"{clean_fn}.{file_ext}"
+
+                        signed_url = self.repository.get_signed_url("resumes", file_path, download=False)
+                        download_url = self.repository.get_signed_url("resumes", file_path, download=True, filename=clean_fn)
+
                         if signed_url:
                             r["file_url"] = signed_url
+                        if download_url:
+                            r["download_url"] = download_url
                     except Exception:
                         pass
             return r

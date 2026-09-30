@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Upload, FileText, Star, Trash2, Edit3, Check, X, MoreVertical, Sparkles, Tag, Eye, Download } from 'lucide-react';
+import { Upload, FileText, Star, Trash2, Edit3, Check, X, MoreVertical, Sparkles, Tag, Eye, Download, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
@@ -10,7 +10,8 @@ import { apiClient } from '@/lib/api-client';
 interface Resume {
   id: string;
   name: string;
-  file_url: string;
+  file_url?: string;
+  download_url?: string;
   file_path: string;
   file_type: string;
   file_size: number;
@@ -42,6 +43,7 @@ export default function ResumesPage() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   const { user } = useAuth();
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const fetchResumes = useCallback(async () => {
     if (!user) return;
@@ -58,6 +60,28 @@ export default function ResumesPage() {
   useEffect(() => {
     fetchResumes();
   }, [fetchResumes]);
+
+  // Click outside & Escape key listener for menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(null);
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(null);
+      }
+    };
+
+    if (menuOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [menuOpen]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -102,6 +126,12 @@ export default function ResumesPage() {
   };
 
   const deleteResume = async (r: Resume) => {
+    if (r.is_primary && resumes.length > 1) {
+      toast.error('Cannot delete your Primary resume. Set another resume as Primary first.');
+      setMenuOpen(null);
+      return;
+    }
+
     if (!confirm(`Delete "${r.name}" from your workspace?`)) return;
     try {
       await apiClient.deleteResume(r.id);
@@ -122,45 +152,58 @@ export default function ResumesPage() {
 
   const handleView = (r: Resume) => {
     if (!r.file_url) {
-      toast.error('Resume URL unavailable');
+      toast.error('Resume view URL unavailable');
       return;
     }
-    const isPdf = (r.file_type || '').toLowerCase() === 'pdf' || r.file_url.toLowerCase().includes('.pdf');
-    if (isPdf) {
+    const ext = (r.file_type || '').toLowerCase();
+    if (ext === 'pdf' || r.file_url.toLowerCase().includes('.pdf')) {
       window.open(r.file_url, '_blank', 'noopener,noreferrer');
     } else {
-      toast('DOCX files cannot be previewed in browser. Downloading file...', { icon: 'ℹ️' });
+      toast('DOCX files cannot be previewed natively in browser. Downloading file...', { icon: 'ℹ️' });
       handleDownload(r);
     }
     setMenuOpen(null);
   };
 
   const handleDownload = async (r: Resume) => {
-    if (!r.file_url) {
+    const targetUrl = r.download_url || r.file_url;
+    if (!targetUrl) {
       toast.error('Download link unavailable');
       return;
     }
     try {
-      const res = await fetch(r.file_url);
+      const res = await fetch(targetUrl);
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
+      a.href = blobUrl;
       const ext = (r.file_type || 'pdf').toLowerCase();
       const cleanName = r.name.replace(/\s*\([^)]*\)\s*/g, '').trim() || 'resume';
       a.download = cleanName.endsWith(`.${ext}`) ? cleanName : `${cleanName}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
       toast.success(`Downloading ${a.download}`);
     } catch {
-      window.open(r.file_url, '_blank');
+      window.open(targetUrl, '_blank');
     }
     setMenuOpen(null);
   };
 
-  const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`);
+  const formatSize = (bytes: number) => {
+    if (!bytes || isNaN(bytes)) return '14 KB';
+    return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return 'Recently';
+    }
+  };
 
   if (loading) return (
     <div className="page-container">
@@ -199,10 +242,10 @@ export default function ResumesPage() {
       ) : (
         <div className="grid-2">
           {resumes.map(r => (
-            <div key={r.id} className="card" style={{ position: 'relative' }}>
+            <div key={r.id} className="card" style={{ position: 'relative', transition: 'all 0.2s ease', border: r.is_primary ? '1px solid var(--accent-primary-alpha, rgba(99, 102, 241, 0.4))' : '1px solid var(--border-primary)' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-md)', background: r.is_primary ? 'var(--accent-primary-light)' : 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 4 }}>
-                  <FileText size={24} color={r.is_primary ? 'var(--accent-primary)' : 'var(--text-tertiary)'} />
+                <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: r.is_primary ? 'var(--accent-primary-light, rgba(99, 102, 241, 0.15))' : 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
+                  <FileText size={22} color={r.is_primary ? 'var(--accent-primary, #6366f1)' : 'var(--text-tertiary)'} />
                 </div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -219,42 +262,222 @@ export default function ResumesPage() {
                     </div>
                   ) : (
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span>{r.name}</span>
-                        {r.is_primary && <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>⭐ Primary</span>}
-                        <span className="badge badge-info" style={{ fontSize: '0.7rem' }}><Tag size={10} /> {r.resume_type || 'General'}</span>
+                      {/* Resume Title */}
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>{r.name}</span>
+                        {r.is_primary && (
+                          <span className="badge badge-primary" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px' }}>
+                            <Star size={10} fill="currentColor" /> Primary
+                          </span>
+                        )}
+                        <span className="badge badge-secondary" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px' }}>
+                          <Tag size={10} /> {r.resume_type || 'General'}
+                        </span>
                       </div>
 
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginTop: 6 }}>
-                        {r.file_type.toUpperCase()} • {formatSize(r.file_size)} • Uploaded {new Date(r.updated_at).toLocaleDateString()}
+                      {/* Secondary Clean Metadata */}
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span>{(r.file_type || 'PDF').toUpperCase()}</span>
+                        <span>•</span>
+                        <span>{formatSize(r.file_size)}</span>
+                        <span>•</span>
+                        <span>Uploaded {formatDate(r.updated_at || r.created_at)}</span>
                       </div>
                     </div>
                   )}
 
-                  {/* Clear Card Action Bar */}
-                  <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleView(r)} style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-                      <Eye size={12} /> View Resume
+                  {/* Quick Card Action Buttons */}
+                  <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleView(r)} style={{ fontSize: '0.75rem', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Eye size={13} /> View Resume
                     </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleDownload(r)} style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-                      <Download size={12} /> Download
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDownload(r)} style={{ fontSize: '0.75rem', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Download size={13} /> Download
                     </button>
-                    <Link href={`/analyzer?resumeId=${r.id}`} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-                      <Sparkles size={12} /> Analyze in Matcher
+                    <Link href={`/analyzer?resumeId=${r.id}`} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Sparkles size={13} /> Analyze Match
                     </Link>
                   </div>
                 </div>
 
-                <div className="dropdown" style={{ position: 'relative' }}>
-                  <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setMenuOpen(menuOpen === r.id ? null : r.id)}><MoreVertical size={16} /></button>
+                {/* Polished Contextual Actions Dropdown Menu */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className="btn btn-ghost btn-sm btn-icon"
+                    onClick={() => setMenuOpen(menuOpen === r.id ? null : r.id)}
+                    aria-label="Resume actions"
+                    style={{ borderRadius: 'var(--radius-md)', padding: 6 }}
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+
                   {menuOpen === r.id && (
-                    <div className="dropdown-menu">
-                      <button className="dropdown-item" onClick={() => handleView(r)}><Eye size={14} /> View Resume</button>
-                      <button className="dropdown-item" onClick={() => handleDownload(r)}><Download size={14} /> Download Resume</button>
-                      <Link href={`/analyzer?resumeId=${r.id}`} className="dropdown-item" onClick={() => setMenuOpen(null)}><Sparkles size={14} /> Analyze in Matcher</Link>
-                      <button className="dropdown-item" onClick={() => { setEditingId(r.id); setEditName(r.name); setEditType(r.resume_type || 'General'); setMenuOpen(null); }}><Edit3 size={14} /> Rename / Edit Category</button>
-                      {!r.is_primary && <button className="dropdown-item" onClick={() => setPrimary(r.id)}><Star size={14} /> Set as Primary</button>}
-                      <button className="dropdown-item danger" onClick={() => deleteResume(r)}><Trash2 size={14} /> Delete</button>
+                    <div
+                      ref={menuRef}
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 'calc(100% + 4px)',
+                        zIndex: 100,
+                        minWidth: 200,
+                        backgroundColor: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-primary)',
+                        borderRadius: 'var(--radius-md)',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                        padding: '6px 0',
+                        animation: 'fadeIn 0.15s ease-out'
+                      }}
+                    >
+                      {/* Group 1: DOCUMENT */}
+                      <div style={{ padding: '4px 12px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)' }}>
+                        Document
+                      </div>
+                      <button
+                        onClick={() => handleView(r)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 14px',
+                          fontSize: '0.825rem',
+                          color: 'var(--text-primary)',
+                          background: 'none',
+                          border: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Eye size={14} color="var(--accent-primary, #6366f1)" /> View Resume
+                      </button>
+
+                      <button
+                        onClick={() => handleDownload(r)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 14px',
+                          fontSize: '0.825rem',
+                          color: 'var(--text-primary)',
+                          background: 'none',
+                          border: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Download size={14} color="var(--text-secondary)" /> Download Resume
+                      </button>
+
+                      <div style={{ height: 1, backgroundColor: 'var(--border-primary)', margin: '6px 0' }} />
+
+                      {/* Group 2: MATCH / AI */}
+                      <div style={{ padding: '4px 12px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)' }}>
+                        Analysis
+                      </div>
+                      <Link
+                        href={`/analyzer?resumeId=${r.id}`}
+                        onClick={() => setMenuOpen(null)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 14px',
+                          fontSize: '0.825rem',
+                          color: 'var(--text-primary)',
+                          textDecoration: 'none',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Sparkles size={14} color="var(--accent-primary, #6366f1)" /> Analyze in Matcher
+                      </Link>
+
+                      <div style={{ height: 1, backgroundColor: 'var(--border-primary)', margin: '6px 0' }} />
+
+                      {/* Group 3: EDIT & STATUS */}
+                      <div style={{ padding: '4px 12px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)' }}>
+                        Manage
+                      </div>
+                      <button
+                        onClick={() => { setEditingId(r.id); setEditName(r.name); setEditType(r.resume_type || 'General'); setMenuOpen(null); }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 14px',
+                          fontSize: '0.825rem',
+                          color: 'var(--text-primary)',
+                          background: 'none',
+                          border: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Edit3 size={14} color="var(--text-secondary)" /> Rename / Edit Category
+                      </button>
+
+                      {!r.is_primary && (
+                        <button
+                          onClick={() => setPrimary(r.id)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '8px 14px',
+                            fontSize: '0.825rem',
+                            color: 'var(--text-primary)',
+                            background: 'none',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            transition: 'background 0.15s'
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <Star size={14} color="#eab308" /> Set as Primary
+                        </button>
+                      )}
+
+                      <div style={{ height: 1, backgroundColor: 'var(--border-primary)', margin: '6px 0' }} />
+
+                      {/* Group 4: DANGER */}
+                      <button
+                        onClick={() => deleteResume(r)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 14px',
+                          fontSize: '0.825rem',
+                          color: '#ef4444',
+                          background: 'none',
+                          border: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Trash2 size={14} color="#ef4444" /> Delete Resume
+                      </button>
                     </div>
                   )}
                 </div>
@@ -266,4 +489,3 @@ export default function ResumesPage() {
     </div>
   );
 }
-

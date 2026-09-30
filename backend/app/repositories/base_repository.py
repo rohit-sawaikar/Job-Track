@@ -67,12 +67,19 @@ class BaseRepository:
             logger.error(f"Error uploading file to storage bucket {bucket_name}: {e}")
             return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}"
 
-    def get_signed_url(self, bucket_name: str, file_path: str, expires_in: int = 3600) -> str:
-        """Generates a temporary signed URL for private bucket file viewing/downloading."""
+    def get_signed_url(self, bucket_name: str, file_path: str, expires_in: int = 3600, download: bool = False, filename: Optional[str] = None) -> str:
+        """Generates a temporary signed URL for private bucket file viewing (inline) or downloading (attachment)."""
         try:
             if not file_path:
                 return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}"
-            res = self.client.storage.from_(bucket_name).create_signed_url(file_path, expires_in)
+            
+            options: dict = {}
+            if download:
+                options["download"] = filename or True
+            else:
+                options["download"] = False
+
+            res = self.client.storage.from_(bucket_name).create_signed_url(file_path, expires_in, options=options)
             if isinstance(res, str):
                 if res.startswith("http"):
                     return res

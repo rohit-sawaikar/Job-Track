@@ -41,6 +41,26 @@ async def upload_resume(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume upload failed: {str(e)}")
 
+@resumes_router.get("/{resume_id}/view", response_model=Dict[str, Any])
+async def view_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
+    resume = resume_service.get_resume_by_id(resume_id, current_user.id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    url = resume.get("file_url")
+    if not url:
+        raise HTTPException(status_code=404, detail="Resume view URL unavailable")
+    return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+
+@resumes_router.get("/{resume_id}/download", response_model=Dict[str, Any])
+async def download_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
+    resume = resume_service.get_resume_by_id(resume_id, current_user.id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    url = resume.get("download_url") or resume.get("file_url")
+    if not url:
+        raise HTTPException(status_code=404, detail="Resume download URL unavailable")
+    return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+
 @resumes_router.post("/{resume_id}/primary", response_model=Dict[str, Any])
 async def set_primary_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
     success = resume_service.set_primary_resume(resume_id, current_user.id)

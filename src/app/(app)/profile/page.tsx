@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, Mail, Phone, Globe, Camera, Save, Briefcase, MapPin, Tag, Plus, Pencil, Trash2, X, Link as LinkIcon } from 'lucide-react';
+import { User, Mail, Phone, Globe, Camera, Save, Briefcase, MapPin, Tag, Plus, Pencil, Trash2, X, Link as LinkIcon, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
 
@@ -15,6 +15,64 @@ interface CustomLink {
   user_id?: string;
   name: string;
   url: string;
+}
+
+function ProfileLink({ url, style }: { url: string; style?: React.CSSProperties }) {
+  if (!url || !url.trim()) return null;
+
+  const rawUrl = url.trim();
+  let href = rawUrl;
+  if (!/^https?:\/\//i.test(href)) {
+    if (/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(href)) {
+      href = 'https://' + href;
+    } else {
+      return null;
+    }
+  }
+
+  try {
+    const parsed = new URL(href);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: 'var(--accent-primary, #3b82f6)',
+        fontSize: '0.84rem',
+        fontWeight: 500,
+        textDecoration: 'none',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        maxWidth: '100%',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        marginTop: 6,
+        transition: 'color 0.15s ease-in-out',
+        ...style,
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none';
+      }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {rawUrl}
+      </span>
+      <ExternalLink size={12} style={{ flexShrink: 0 }} />
+    </a>
+  );
 }
 
 export default function ProfilePage() {
@@ -442,10 +500,12 @@ export default function ProfilePage() {
               <div className="form-group">
                 <label className="form-label">LinkedIn Profile</label>
                 <input className="form-input" value={form.linkedin} onChange={(e) => updateFormField('linkedin', e.target.value)} placeholder="https://linkedin.com/in/..." />
+                <ProfileLink url={form.linkedin} />
               </div>
               <div className="form-group">
                 <label className="form-label">GitHub Profile</label>
                 <input className="form-input" value={form.github} onChange={(e) => updateFormField('github', e.target.value)} placeholder="https://github.com/..." />
+                <ProfileLink url={form.github} />
               </div>
               <div className="form-group">
                 <label className="form-label">
@@ -453,6 +513,7 @@ export default function ProfilePage() {
                   Portfolio Website
                 </label>
                 <input className="form-input" value={form.portfolio} onChange={(e) => updateFormField('portfolio', e.target.value)} placeholder="https://yourportfolio.dev" />
+                <ProfileLink url={form.portfolio} />
               </div>
 
               {/* Custom Links List */}
@@ -473,16 +534,9 @@ export default function ProfilePage() {
                         justifyContent: 'space-between',
                       }}
                     >
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 12 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 12, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{link.name}</div>
-                        <a
-                          href={link.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ fontSize: '0.82rem', color: 'var(--accent-primary)', textDecoration: 'none', wordBreak: 'break-all' }}
-                        >
-                          {link.url}
-                        </a>
+                        <ProfileLink url={link.url} style={{ marginTop: 2 }} />
                       </div>
                       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                         <button
