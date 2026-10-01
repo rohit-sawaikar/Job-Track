@@ -6,6 +6,7 @@ import { Upload, FileText, Star, Trash2, Edit3, Check, X, MoreVertical, Sparkles
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
+import ResumePreviewModal from '@/components/ResumePreviewModal';
 
 interface Resume {
   id: string;
@@ -41,6 +42,8 @@ export default function ResumesPage() {
   const [editName, setEditName] = useState('');
   const [editType, setEditType] = useState('General');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewResume, setPreviewResume] = useState<Resume | null>(null);
 
   const { user } = useAuth();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -150,92 +153,14 @@ export default function ResumesPage() {
     fetchResumes();
   };
 
-  const handleView = async (r: Resume) => {
-    console.log('[Resume View] CLICK');
-    console.log('[Resume View] resume id:', r?.id);
-
-    const ext = (r?.file_type || '').toLowerCase();
-    if (ext === 'docx' || (r?.name || '').toLowerCase().endsWith('.docx')) {
-      console.log('[Resume View] docx file detected, delegating to handleDownload');
-      toast('DOCX files cannot be previewed natively in browser. Downloading file...', { icon: 'ℹ️' });
-      await handleDownload(r);
-      setMenuOpen(null);
-      return;
-    }
-
-    const previewWindow = window.open('about:blank', '_blank');
-
-    if (!previewWindow) {
-      console.error('[Resume View] popup blocked by browser');
-      toast.error('Please allow pop-ups to view your resume.');
-      setMenuOpen(null);
-      return;
-    }
-
-    console.log('[Resume View] blank preview opened');
-
-    try {
-      if (previewWindow.document) {
-        previewWindow.document.title = 'Loading Resume Preview...';
-        previewWindow.document.body.style.background = '#0f172a';
-        previewWindow.document.body.style.color = '#94a3b8';
-        previewWindow.document.body.style.display = 'flex';
-        previewWindow.document.body.style.justifyContent = 'center';
-        previewWindow.document.body.style.alignItems = 'center';
-        previewWindow.document.body.style.height = '100vh';
-        previewWindow.document.body.style.fontFamily = 'system-ui, sans-serif';
-        previewWindow.document.body.innerHTML = '<div>Loading resume preview...</div>';
-      }
-    } catch (e) {
-      console.warn('[Resume View] could not write loading UI to blank window:', e);
-    }
-
-    try {
-      const token = await apiClient.getAuthToken();
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const sessionRes = await fetch(`/api/py/resumes/${r.id}/preview-session`, {
-        method: 'POST',
-        headers,
-        credentials: 'same-origin'
-      });
-
-      console.log('[Resume View] preview-session response:', sessionRes.status);
-
-      if (!sessionRes.ok) {
-        const errText = await sessionRes.text().catch(() => '');
-        console.error('[Resume View] preview session creation failed:', sessionRes.status, errText);
-        throw new Error(`Failed to create preview session (HTTP ${sessionRes.status})`);
-      }
-
-      if (!previewWindow || previewWindow.closed) {
-        console.error('[Resume View] preview window unavailable');
-        toast.error('Preview window was closed or unavailable');
-        return;
-      }
-
-      const viewUrl = `${window.location.origin}/api/py/resumes/${r.id}/view`;
-      console.log('[Resume View] view URL:', viewUrl);
-      previewWindow.location.assign(viewUrl);
-      console.log('[Resume View] navigation assigned');
-    } catch (error) {
-      console.error('[Resume View] FAILED:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to open resume preview');
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.close();
-      }
-    } finally {
-      setMenuOpen(null);
-    }
+  const handleView = (r: Resume) => {
+    console.log('[Resume View] opening preview modal for resume id:', r?.id);
+    setPreviewResume(r);
+    setPreviewModalOpen(true);
+    setMenuOpen(null);
   };
 
-  const handleDownload = async (r: Resume) => {
+  const handleDownload = async (r: { id: string; name: string; file_type?: string; download_url?: string; file_url?: string }) => {
     console.log('[Resume Download] CLICK');
     console.log('[Resume Download] resume id:', r?.id);
     try {
@@ -580,6 +505,13 @@ export default function ResumesPage() {
           ))}
         </div>
       )}
+
+      <ResumePreviewModal
+        isOpen={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        resume={previewResume}
+        onDownload={handleDownload}
+      />
     </div>
   );
 }
