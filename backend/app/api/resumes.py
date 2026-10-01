@@ -183,6 +183,10 @@ async def view_resume(
         "Content-Disposition": f"inline; filename=\"{clean_fn}\"",
         "Content-Type": media_type,
     }
+    print("[Resume Preview Headers] content_type:", media_type)
+    print("[Resume Preview Headers] content_disposition:", headers.get("Content-Disposition"))
+    print("[Resume Preview Headers] content_length:", len(file_bytes) if file_bytes else 0)
+    print("[Resume Preview Headers] filename:", clean_fn)
     print("[Resume Preview] PDF response status: 200")
     return Response(content=file_bytes, media_type=media_type, headers=headers)
 
