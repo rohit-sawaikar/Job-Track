@@ -147,10 +147,19 @@ export default function ResumesPage() {
   };
 
   const saveRename = async (id: string) => {
-    if (!editName.trim()) return;
-    setEditingId(null);
-    toast.success('Resume updated');
-    fetchResumes();
+    const cleanName = editName.trim();
+    if (!cleanName) {
+      toast.error('Resume name cannot be empty');
+      return;
+    }
+    try {
+      await apiClient.updateResume(id, { name: cleanName, resume_type: editType });
+      toast.success('Resume updated');
+      setEditingId(null);
+      fetchResumes();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update resume');
+    }
   };
 
   const handleView = (r: Resume) => {
@@ -161,33 +170,23 @@ export default function ResumesPage() {
   };
 
   const handleDownload = async (r: { id: string; name: string; file_type?: string; download_url?: string; file_url?: string }) => {
-    console.log('[Resume Download] CLICK');
-    console.log('[Resume Download] resume id:', r?.id);
+    console.log('[Resume Download] CLICK for resume id:', r?.id);
     try {
       const token = await apiClient.getAuthToken();
-      console.log('[Resume Download] session exists:', Boolean(token));
-      console.log('[Resume Download] access token exists:', Boolean(token));
-
-      let downloadEndpoint = token 
-        ? `/api/py/resumes/${r.id}/download?token=${encodeURIComponent(token)}`
-        : `/api/py/resumes/${r.id}/download`;
-
-      if (!downloadEndpoint) {
-        downloadEndpoint = r.download_url || r.file_url || '';
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
 
-      console.log('[Resume Download] target URL:', downloadEndpoint);
-
-      if (!downloadEndpoint) {
-        toast.error('Download link unavailable');
+      const res = await fetch(`/api/py/resumes/${r.id}/download`, { headers });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error('[Resume Download] download failed:', res.status, errText);
+        toast.error(`Download failed (HTTP ${res.status})`);
         return;
       }
 
-      console.log('[Resume Download] fetching blob...');
-      const res = await fetch(downloadEndpoint);
-      console.log('[Resume Download] fetch status:', res.status);
       const blob = await res.blob();
-      console.log('[Resume Download] blob size:', blob.size, 'type:', blob.type);
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -195,16 +194,12 @@ export default function ResumesPage() {
       const cleanName = r.name.replace(/\s*\([^)]*\)\s*/g, '').trim() || 'resume';
       a.download = cleanName.endsWith(`.${ext}`) ? cleanName : `${cleanName}.${ext}`;
       document.body.appendChild(a);
-      console.log('[Resume Download] clicking hidden anchor element');
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(blobUrl);
-      console.log('[Resume Download] handler completed successfully');
-      toast.success(`Downloading ${a.download}`);
     } catch (error) {
       console.error('[Resume Download] FAILED:', error);
-      const fallbackUrl = r.download_url || r.file_url;
-      if (fallbackUrl) window.open(fallbackUrl, '_blank');
+      toast.error(error instanceof Error ? error.message : 'Failed to download resume');
     } finally {
       setMenuOpen(null);
     }

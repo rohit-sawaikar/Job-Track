@@ -134,6 +134,26 @@ class ResumeService:
     def set_primary_resume(self, resume_id: str, user_id: str) -> bool:
         return self.repository.set_primary_resume(resume_id, user_id)
 
+    def update_resume(self, resume_id: str, user_id: str, resume_update: ResumeUpdate) -> Dict[str, Any]:
+        existing = self.repository.get_resume_by_id(resume_id, user_id)
+        if not existing:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        update_data = resume_update.model_dump(exclude_unset=True)
+        if "name" in update_data and update_data["name"] is not None:
+            clean_name = str(update_data["name"]).strip()
+            if not clean_name:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Resume name cannot be empty")
+            update_data["name"] = clean_name
+
+        updated = self.repository.update_resume(resume_id, user_id, update_data)
+        if not updated:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="Failed to update resume")
+        return updated
+
     def delete_resume(self, resume_id: str, user_id: str) -> bool:
         return self.repository.delete_resume(resume_id, user_id)
 

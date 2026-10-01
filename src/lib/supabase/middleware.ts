@@ -33,7 +33,14 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const { pathname, searchParams } = request.nextUrl;
+
+  // Intercept OAuth callback codes landing on / or /login and route to /auth/callback
+  if (searchParams.has('code') && pathname !== '/auth/callback') {
+    const callbackUrl = request.nextUrl.clone();
+    callbackUrl.pathname = '/auth/callback';
+    return NextResponse.redirect(callbackUrl);
+  }
 
   // Public routes that don't require auth
   const publicRoutes = ['/login', '/signup', '/auth/callback'];

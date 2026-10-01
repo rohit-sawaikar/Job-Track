@@ -182,6 +182,20 @@ class PythonApiClient {
     return res.json();
   }
 
+  async updateResume(id: string, data: { name?: string; resume_type?: string; is_primary?: boolean }) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/py/resumes/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to update resume');
+    }
+    return res.json();
+  }
+
   async deleteResume(id: string) {
     const headers = await this.getAuthHeaders();
     const res = await fetch(`/api/py/resumes/${id}`, {
@@ -280,6 +294,19 @@ class PythonApiClient {
     });
     if (!res.ok) throw new Error('Failed to delete custom link');
     return true;
+  }
+
+  async deleteAccount() {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/py/profile/account', {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to delete account');
+    }
+    return res.json();
   }
 
   // Analyses REST Endpoints

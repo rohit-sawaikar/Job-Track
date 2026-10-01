@@ -49,6 +49,17 @@ class ResumeRepository(BaseRepository):
             logger.error(f"Error setting primary resume {resume_id} for user {user_id}: {e}")
             return False
 
+    def update_resume(self, resume_id: str, user_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        db_payload = {k: v for k, v in update_data.items() if k in ALLOWED_RESUME_COLUMNS and v is not None}
+        if not db_payload:
+            return self.get_resume_by_id(resume_id, user_id)
+        try:
+            res = self.client.from_('resumes').update(db_payload).eq('id', resume_id).eq('user_id', user_id).execute()
+            return res.data[0] if res.data else self.get_resume_by_id(resume_id, user_id)
+        except Exception as e:
+            logger.error(f"Error updating resume {resume_id} for user {user_id}: {e}")
+            raise e
+
     def delete_resume(self, resume_id: str, user_id: str) -> bool:
         try:
             self.client.from_('resumes').delete().eq('id', resume_id).eq('user_id', user_id).execute()

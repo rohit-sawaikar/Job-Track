@@ -8,12 +8,15 @@ import { useRouter } from 'next/navigation';
 import { Sun, Moon, LogOut, Trash2, Key, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+import { apiClient } from '@/lib/api-client';
+
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { user, profile, signOut } = useAuth();
   const [changingPassword, setChangingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const supabase = createClient();
   const router = useRouter();
 
@@ -31,8 +34,28 @@ export default function SettingsPage() {
   };
 
   const handleDeleteAccount = async () => {
-    if (!confirm('Are you sure? This will permanently delete your account and all data. This cannot be undone.')) return;
-    toast.error('Account deletion requires admin action. Please contact support.');
+    const confirmed = window.confirm(
+      'Are you sure you want to delete your Job Track account?\n\n' +
+      'This will permanently delete:\n' +
+      '• Profile details & settings\n' +
+      '• Resumes & uploaded document files\n' +
+      '• Job applications & tracking history\n' +
+      '• AI analysis history\n\n' +
+      'This action CANNOT be undone.'
+    );
+    if (!confirmed) return;
+
+    setDeletingAccount(true);
+    try {
+      await apiClient.deleteAccount();
+      await signOut();
+      toast.success('Your account has been permanently deleted.');
+      router.push('/login');
+    } catch (err: unknown) {
+      console.error('[Account Deletion Error]:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to delete account');
+      setDeletingAccount(false);
+    }
   };
 
   return (
@@ -88,7 +111,9 @@ export default function SettingsPage() {
         <div className="card">
           <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Data</h3>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 16 }}>Permanently delete your account and all associated data. This action cannot be undone.</p>
-          <button className="btn btn-danger btn-sm" onClick={handleDeleteAccount}><Trash2 size={14} /> Delete Account</button>
+          <button className="btn btn-danger btn-sm" onClick={handleDeleteAccount} disabled={deletingAccount}>
+            {deletingAccount ? <span className="spinner spinner-sm" /> : <><Trash2 size={14} /> Delete Account</>}
+          </button>
         </div>
       </div>
     </div>

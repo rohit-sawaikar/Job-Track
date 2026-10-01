@@ -203,6 +203,14 @@ async def set_primary_resume(resume_id: str, current_user: CurrentUser = Depends
     success = resume_service.set_primary_resume(resume_id, current_user.id)
     return {"success": success}
 
+@resumes_router.put("/{resume_id}", response_model=Dict[str, Any])
+async def update_resume(
+    resume_id: str,
+    resume_data: ResumeUpdate,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    return resume_service.update_resume(resume_id, current_user.id, resume_data)
+
 @resumes_router.delete("/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
     resume_service.delete_resume(resume_id, current_user.id)
@@ -270,5 +278,13 @@ async def delete_custom_link(link_id: str, current_user: CurrentUser = Depends(g
     if not success:
         raise HTTPException(status_code=404, detail="Link not found")
     return None
+
+@profile_router.delete("/account", status_code=status.HTTP_200_OK)
+async def delete_user_account(current_user: CurrentUser = Depends(get_current_user)):
+    try:
+        profile_service.delete_account(current_user.id)
+        return {"success": True, "message": "Account deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Account deletion failed: {str(e)}")
 
 

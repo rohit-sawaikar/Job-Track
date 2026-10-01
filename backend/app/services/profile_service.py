@@ -84,6 +84,63 @@ class ProfileService:
     def delete_custom_link(self, link_id: str, user_id: str) -> bool:
         return self.repository.delete_custom_link(link_id, user_id)
 
+    def delete_account(self, user_id: str) -> bool:
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            from app.config import settings
+        except ImportError:
+            from backend.app.config import settings
+
+        try:
+            # 1. Delete storage files in resumes bucket
+            try:
+                res_files = self.repository.client.storage.from_("resumes").list(user_id)
+                if res_files and isinstance(res_files, list):
+                    paths = [f"{user_id}/{f['name']}" for f in res_files if isinstance(f, dict) and "name" in f]
+                    if paths:
+                        self.repository.client.storage.from_("resumes").remove(paths)
+            except Exception as e:
+                logger.warning(f"Could not clean up resumes storage for user {user_id}: {e}")
+
+            # 2. Delete storage files in avatars bucket
+            try:
+                avatar_files = self.repository.client.storage.from_("avatars").list(user_id)
+                if avatar_files and isinstance(avatar_files, list):
+                    paths = [f"{user_id}/{f['name']}" for f in avatar_files if isinstance(f, dict) and "name" in f]
+                    if paths:
+                        self.repository.client.storage.from_("avatars").remove(paths)
+            except Exception as e:
+                logger.warning(f"Could not clean up avatars storage for user {user_id}: {e}")
+
+            # 3. Clean up database records in dependency order
+            db_tables = [
+                ("resume_analyses", "user_id"),
+                ("resumes", "user_id"),
+                ("job_activities", "user_id"),
+                ("jobs", "user_id"),
+                ("profile_links", "user_id"),
+                ("profiles", "id"),
+            ]
+            for table, col in db_tables:
+                try:
+                    self.repository.client.from_(table).delete().eq(col, user_id).execute()
+                except Exception as tbl_err:
+                    logger.warning(f"Error cleaning up table {table} for user {user_id}: {tbl_err}")
+
+            # 4. Delete Supabase Auth user via Admin API if service key present
+            if settings.SUPABASE_SERVICE_ROLE_KEY:
+                try:
+                    from supabase import create_client
+                    admin_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+                    admin_client.auth.admin.delete_user(user_id)
+                except Exception as auth_err:
+                    logger.error(f"Failed to delete auth user {user_id} via admin API: {auth_err}")
+            return True
+        except Exception as e:
+            logger.error(f"Account deletion failed for user {user_id}: {e}")
+            raise e
+
 
 
 
