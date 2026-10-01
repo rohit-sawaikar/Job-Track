@@ -17,7 +17,12 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
     NEXT_PUBLIC_SUPABASE_URL: str = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY: str = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or 
+        os.getenv("SUPABASE_SERVICE_KEY", "") or 
+        os.getenv("SUPABASE_SECRET_KEY", "") or 
+        os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
+    )
     SUPABASE_ANON_KEY: str = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
     SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
     PORT: int = int(os.getenv("PORT", "8000"))

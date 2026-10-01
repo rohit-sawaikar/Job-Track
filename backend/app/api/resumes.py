@@ -125,30 +125,12 @@ async def view_resume(
     jt_resume_preview: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None)
 ):
-    cookie_header = request.headers.get("cookie")
-    cookie_names = []
-    if cookie_header:
-        for part in cookie_header.split(";"):
-            name = part.split("=", 1)[0].strip()
-            if name:
-                cookie_names.append(name)
-
-    print("[Resume View Diagnostic] path:", request.url.path)
-    print("[Resume View Diagnostic] host:", request.headers.get("host"))
-    print("[Resume View Diagnostic] origin:", request.headers.get("origin"))
-    print("[Resume View Diagnostic] has_cookie_header:", bool(cookie_header))
-    print("[Resume View Diagnostic] cookie_names:", cookie_names)
-    print("[Resume View Diagnostic] has_preview_cookie:", "jt_resume_preview" in request.cookies)
-
-    print("[Resume Preview] opening PDF endpoint")
     user_id = None
     if jt_resume_preview:
         user_id = verify_preview_cookie(jt_resume_preview, resume_id)
-        print(f"[Resume Preview] authenticated user: {user_id}")
     elif authorization:
         user = await get_current_user(authorization=authorization)
         user_id = user.id
-        print(f"[Resume Preview] authenticated user (Authorization header): {user_id}")
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -158,7 +140,6 @@ async def view_resume(
     resume = resume_service.get_resume_by_id(resume_id, user_id)
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
-    print("[Resume Preview] resume ownership verified")
 
     file_path = resume.get("file_path")
     if not file_path:
@@ -166,10 +147,10 @@ async def view_resume(
     
     file_bytes = resume_service.repository.download_file_from_storage("resumes", file_path)
     if not file_bytes:
-        url = resume.get("file_url")
-        if not url:
-            raise HTTPException(status_code=404, detail="Resume view URL unavailable")
-        return {"url": url, "file_type": resume.get("file_type", "pdf"), "name": resume.get("name", "")}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume file content could not be retrieved from storage"
+        )
 
     file_type = (resume.get("file_type") or "pdf").lower()
     media_type = "application/pdf" if file_type == "pdf" else ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_type == "docx" else "application/octet-stream")
@@ -183,11 +164,6 @@ async def view_resume(
         "Content-Disposition": f"inline; filename=\"{clean_fn}\"",
         "Content-Type": media_type,
     }
-    print("[Resume Preview Headers] content_type:", media_type)
-    print("[Resume Preview Headers] content_disposition:", headers.get("Content-Disposition"))
-    print("[Resume Preview Headers] content_length:", len(file_bytes) if file_bytes else 0)
-    print("[Resume Preview Headers] filename:", clean_fn)
-    print("[Resume Preview] PDF response status: 200")
     return Response(content=file_bytes, media_type=media_type, headers=headers)
 
 @resumes_router.get("/{resume_id}/download")

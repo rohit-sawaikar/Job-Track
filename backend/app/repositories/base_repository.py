@@ -104,11 +104,32 @@ class BaseRepository:
             return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_path}"
 
     def download_file_from_storage(self, bucket_name: str, file_path: str) -> Optional[bytes]:
-        """Downloads file bytes directly from Supabase Storage bucket."""
+        """
+        Downloads file bytes directly from Supabase Storage bucket.
+        If direct download fails (e.g. storage RLS or anon client fallback), attempts fetching via signed URL.
+        Logs safe error information without exposing secrets or credentials.
+        """
         try:
             return self.client.storage.from_(bucket_name).download(file_path)
         except Exception as e:
-            logger.error(f"Error downloading file from storage bucket {bucket_name}/{file_path}: {e}")
+            status_code = getattr(e, "status_code", getattr(e, "code", None))
+            error_type = type(e).__name__
+            logger.error(
+                f"[Storage Download Failed] bucket={bucket_name} path={file_path} error_type={error_type} status_code={status_code}"
+            )
+            try:
+                signed_url = self.get_signed_url(bucket_name, file_path, expires_in=60)
+                if signed_url and isinstance(signed_url, str) and signed_url.startswith("http"):
+                    import urllib.request
+                    req = urllib.request.Request(signed_url, headers={"User-Agent": "FastAPI-Server"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        content = resp.read()
+                        if content:
+                            return content
+            except Exception as signed_err:
+                logger.error(
+                    f"[Storage Download Signed Fallback Failed] bucket={bucket_name} path={file_path} error={type(signed_err).__name__}"
+                )
             return None
 
 
