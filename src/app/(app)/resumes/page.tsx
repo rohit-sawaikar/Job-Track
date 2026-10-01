@@ -151,35 +151,90 @@ export default function ResumesPage() {
   };
 
   const handleView = async (r: Resume) => {
-    const ext = (r.file_type || '').toLowerCase();
-    if (ext === 'docx' || (r.name || '').toLowerCase().endsWith('.docx')) {
+    console.log('[Resume View] CLICK');
+    console.log('[Resume View] resume id:', r?.id);
+
+    const ext = (r?.file_type || '').toLowerCase();
+    if (ext === 'docx' || (r?.name || '').toLowerCase().endsWith('.docx')) {
+      console.log('[Resume View] docx file detected, delegating to handleDownload');
       toast('DOCX files cannot be previewed natively in browser. Downloading file...', { icon: 'ℹ️' });
-      handleDownload(r);
+      await handleDownload(r);
       setMenuOpen(null);
       return;
     }
 
+    const previewWindow = window.open('about:blank', '_blank');
+
+    if (!previewWindow) {
+      console.error('[Resume View] popup blocked by browser');
+      toast.error('Please allow pop-ups to view your resume.');
+      setMenuOpen(null);
+      return;
+    }
+
+    console.log('[Resume View] blank preview opened');
+
+    try {
+      if (previewWindow.document) {
+        previewWindow.document.title = 'Loading Resume Preview...';
+        previewWindow.document.body.style.background = '#0f172a';
+        previewWindow.document.body.style.color = '#94a3b8';
+        previewWindow.document.body.style.display = 'flex';
+        previewWindow.document.body.style.justifyContent = 'center';
+        previewWindow.document.body.style.alignItems = 'center';
+        previewWindow.document.body.style.height = '100vh';
+        previewWindow.document.body.style.fontFamily = 'system-ui, sans-serif';
+        previewWindow.document.body.innerHTML = '<div>Loading resume preview...</div>';
+      }
+    } catch (e) {
+      console.warn('[Resume View] could not write loading UI to blank window:', e);
+    }
+
     try {
       const token = await apiClient.getAuthToken();
-      const viewEndpoint = token 
-        ? `/api/py/resumes/${r.id}/view?token=${encodeURIComponent(token)}`
-        : `/api/py/resumes/${r.id}/view`;
 
-      console.log('[Resume View] resume id:', r.id);
-      window.open(viewEndpoint, '_blank', 'noopener,noreferrer');
-    } catch {
-      if (r.file_url) {
-        window.open(r.file_url, '_blank', 'noopener,noreferrer');
-      } else {
-        toast.error('Failed to retrieve resume preview link');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
+
+      const sessionRes = await fetch(`/api/py/resumes/${r.id}/preview-session`, {
+        method: 'POST',
+        headers,
+        credentials: 'same-origin'
+      });
+
+      console.log('[Resume View] preview-session response:', sessionRes.status);
+
+      if (!sessionRes.ok) {
+        const errText = await sessionRes.text().catch(() => '');
+        console.error('[Resume View] preview session creation failed:', sessionRes.status, errText);
+        throw new Error(`Failed to create preview session (HTTP ${sessionRes.status})`);
+      }
+
+      console.log('[Resume View] navigating preview window');
+      previewWindow.location.href = `/api/py/resumes/${r.id}/view`;
+    } catch (error) {
+      console.error('[Resume View] FAILED:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to open resume preview');
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
+    } finally {
+      setMenuOpen(null);
     }
-    setMenuOpen(null);
   };
 
   const handleDownload = async (r: Resume) => {
+    console.log('[Resume Download] CLICK');
+    console.log('[Resume Download] resume id:', r?.id);
     try {
       const token = await apiClient.getAuthToken();
+      console.log('[Resume Download] session exists:', Boolean(token));
+      console.log('[Resume Download] access token exists:', Boolean(token));
+
       let downloadEndpoint = token 
         ? `/api/py/resumes/${r.id}/download?token=${encodeURIComponent(token)}`
         : `/api/py/resumes/${r.id}/download`;
@@ -188,13 +243,18 @@ export default function ResumesPage() {
         downloadEndpoint = r.download_url || r.file_url || '';
       }
 
+      console.log('[Resume Download] target URL:', downloadEndpoint);
+
       if (!downloadEndpoint) {
         toast.error('Download link unavailable');
         return;
       }
 
+      console.log('[Resume Download] fetching blob...');
       const res = await fetch(downloadEndpoint);
+      console.log('[Resume Download] fetch status:', res.status);
       const blob = await res.blob();
+      console.log('[Resume Download] blob size:', blob.size, 'type:', blob.type);
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -202,15 +262,19 @@ export default function ResumesPage() {
       const cleanName = r.name.replace(/\s*\([^)]*\)\s*/g, '').trim() || 'resume';
       a.download = cleanName.endsWith(`.${ext}`) ? cleanName : `${cleanName}.${ext}`;
       document.body.appendChild(a);
+      console.log('[Resume Download] clicking hidden anchor element');
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(blobUrl);
+      console.log('[Resume Download] handler completed successfully');
       toast.success(`Downloading ${a.download}`);
-    } catch {
+    } catch (error) {
+      console.error('[Resume Download] FAILED:', error);
       const fallbackUrl = r.download_url || r.file_url;
       if (fallbackUrl) window.open(fallbackUrl, '_blank');
+    } finally {
+      setMenuOpen(null);
     }
-    setMenuOpen(null);
   };
 
   const formatSize = (bytes: number) => {

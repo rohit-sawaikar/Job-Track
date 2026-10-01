@@ -1,7 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response, Cookie, Header, Request
 from typing import List, Dict, Any, Optional
+import time
+import os
+import jwt
+
 try:
-    from app.api.deps import get_current_user, CurrentUser
+    from app.api.deps import get_current_user, CurrentUser, validate_uuid
+    from app.config import settings
     from app.schemas.resume import ResumeCreate, ResumeUpdate
     from app.schemas.analysis import AnalysisCreateRequest
     from app.schemas.profile import ProfileUpdate, ProfileLinkCreate, ProfileLinkUpdate
@@ -9,7 +14,8 @@ try:
     from app.services.analysis_service import AnalysisService
     from app.services.profile_service import ProfileService
 except ImportError:
-    from backend.app.api.deps import get_current_user, CurrentUser
+    from backend.app.api.deps import get_current_user, CurrentUser, validate_uuid
+    from backend.app.config import settings
     from backend.app.schemas.resume import ResumeCreate, ResumeUpdate
     from backend.app.schemas.analysis import AnalysisCreateRequest
     from backend.app.schemas.profile import ProfileUpdate, ProfileLinkCreate, ProfileLinkUpdate
@@ -20,6 +26,49 @@ except ImportError:
 # Resumes Router
 resumes_router = APIRouter(prefix="/api/py/resumes", tags=["resumes"])
 resume_service = ResumeService()
+
+PREVIEW_COOKIE_NAME = "jt_resume_preview"
+PREVIEW_COOKIE_MAX_AGE = 60
+
+def _get_preview_secret() -> str:
+    return (getattr(settings, "SUPABASE_JWT_SECRET", "") or 
+            getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "") or 
+            "jt_preview_secret_key_2026").strip()
+
+def generate_preview_token(user_id: str, resume_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "sub": user_id,
+        "resume_id": resume_id,
+        "type": "resume_preview",
+        "iat": now,
+        "exp": now + PREVIEW_COOKIE_MAX_AGE
+    }
+    return jwt.encode(payload, _get_preview_secret(), algorithm="HS256")
+
+def verify_preview_cookie(cookie_val: Optional[str], expected_resume_id: str) -> str:
+    if not cookie_val:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing preview session cookie"
+        )
+    try:
+        payload = jwt.decode(cookie_val, _get_preview_secret(), algorithms=["HS256"])
+        if payload.get("type") != "resume_preview":
+            raise ValueError("Invalid preview token type")
+        if payload.get("resume_id") != expected_resume_id:
+            raise ValueError("Preview token resume_id mismatch")
+        user_id = payload.get("sub")
+        if not user_id or not validate_uuid(user_id):
+            raise ValueError("Invalid user_id in preview token")
+        return str(user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired preview session: {str(e)}"
+        )
 
 @resumes_router.get("", response_model=List[Dict[str, Any]])
 async def get_resumes(current_user: CurrentUser = Depends(get_current_user)):
@@ -41,11 +90,61 @@ async def upload_resume(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume upload failed: {str(e)}")
 
-@resumes_router.get("/{resume_id}/view")
-async def view_resume(resume_id: str, current_user: CurrentUser = Depends(get_current_user)):
+@resumes_router.post("/{resume_id}/preview-session")
+async def create_preview_session(
+    resume_id: str,
+    response: Response,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    print(f"[Resume Preview] authenticated user: {current_user.id}")
     resume = resume_service.get_resume_by_id(resume_id, current_user.id)
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
+    print("[Resume Preview] resume ownership verified")
+
+    token = generate_preview_token(current_user.id, resume_id)
+    print("[Resume Preview] preview credential valid")
+
+    is_secure = os.getenv("VERCEL_ENV") == "production" or os.getenv("NODE_ENV") == "production"
+    response.set_cookie(
+        key=PREVIEW_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=PREVIEW_COOKIE_MAX_AGE,
+        path="/api/py/resumes",
+    )
+    print("[Resume Preview] preview session status: 200")
+    return {"success": True}
+
+@resumes_router.get("/{resume_id}/view")
+async def view_resume(
+    resume_id: str,
+    request: Request,
+    jt_resume_preview: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None)
+):
+    print("[Resume Preview] opening PDF endpoint")
+    user_id = None
+    if jt_resume_preview:
+        user_id = verify_preview_cookie(jt_resume_preview, resume_id)
+        print(f"[Resume Preview] authenticated user: {user_id}")
+    elif authorization:
+        user = await get_current_user(authorization=authorization)
+        user_id = user.id
+        print(f"[Resume Preview] authenticated user (Authorization header): {user_id}")
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing preview session cookie or Authorization header"
+        )
+
+    resume = resume_service.get_resume_by_id(resume_id, user_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    print("[Resume Preview] resume ownership verified")
+
     file_path = resume.get("file_path")
     if not file_path:
         raise HTTPException(status_code=404, detail="Resume file path missing")
@@ -69,6 +168,7 @@ async def view_resume(resume_id: str, current_user: CurrentUser = Depends(get_cu
         "Content-Disposition": f"inline; filename=\"{clean_fn}\"",
         "Content-Type": media_type,
     }
+    print("[Resume Preview] PDF response status: 200")
     return Response(content=file_bytes, media_type=media_type, headers=headers)
 
 @resumes_router.get("/{resume_id}/download")
