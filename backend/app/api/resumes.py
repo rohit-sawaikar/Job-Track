@@ -163,7 +163,9 @@ async def view_resume(
     headers = {
         "Content-Disposition": f"inline; filename=\"{clean_fn}\"",
         "Content-Type": media_type,
+        "Content-Length": str(len(file_bytes)),
     }
+    print(f"[Resume View Final] status=200 content_type={media_type} content_disposition=inline content_length={len(file_bytes)}")
     return Response(content=file_bytes, media_type=media_type, headers=headers)
 
 @resumes_router.get("/{resume_id}/download")
