@@ -125,6 +125,21 @@ async def view_resume(
     jt_resume_preview: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None)
 ):
+    cookie_header = request.headers.get("cookie")
+    cookie_names = []
+    if cookie_header:
+        for part in cookie_header.split(";"):
+            name = part.split("=", 1)[0].strip()
+            if name:
+                cookie_names.append(name)
+
+    print("[Resume View Diagnostic] path:", request.url.path)
+    print("[Resume View Diagnostic] host:", request.headers.get("host"))
+    print("[Resume View Diagnostic] origin:", request.headers.get("origin"))
+    print("[Resume View Diagnostic] has_cookie_header:", bool(cookie_header))
+    print("[Resume View Diagnostic] cookie_names:", cookie_names)
+    print("[Resume View Diagnostic] has_preview_cookie:", "jt_resume_preview" in request.cookies)
+
     print("[Resume Preview] opening PDF endpoint")
     user_id = None
     if jt_resume_preview:
