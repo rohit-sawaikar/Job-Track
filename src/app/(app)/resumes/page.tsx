@@ -214,8 +214,16 @@ export default function ResumesPage() {
         throw new Error(`Failed to create preview session (HTTP ${sessionRes.status})`);
       }
 
-      console.log('[Resume View] navigating preview window');
-      previewWindow.location.href = `/api/py/resumes/${r.id}/view`;
+      if (!previewWindow || previewWindow.closed) {
+        console.error('[Resume View] preview window unavailable');
+        toast.error('Preview window was closed or unavailable');
+        return;
+      }
+
+      const viewUrl = `${window.location.origin}/api/py/resumes/${r.id}/view`;
+      console.log('[Resume View] view URL:', viewUrl);
+      previewWindow.location.assign(viewUrl);
+      console.log('[Resume View] navigation assigned');
     } catch (error) {
       console.error('[Resume View] FAILED:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to open resume preview');
