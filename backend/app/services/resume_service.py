@@ -1,5 +1,6 @@
 import time
-from typing import List, Optional, Dict, Any
+import re
+from typing import List, Optional, Dict, Any, Tuple
 try:
     from app.repositories.resume_repository import ResumeRepository
     from app.services.resume_parser import ResumeParser
@@ -8,6 +9,48 @@ except ImportError:
     from backend.app.repositories.resume_repository import ResumeRepository
     from backend.app.services.resume_parser import ResumeParser
     from backend.app.schemas.resume import ResumeCreate, ResumeUpdate
+
+VALID_RESUME_TYPES = {"General", "Technical", "Management", "Executive", "Creative", "Academic", "Other"}
+
+def extract_clean_name_and_type(raw_name: str, file_ext: str = "") -> Tuple[str, str]:
+    if not raw_name:
+        return ("resume", "General")
+    
+    name = str(raw_name).strip()
+    
+    ext_suffix = ""
+    for ext in [".pdf", ".docx", ".doc"]:
+        if name.lower().endswith(ext):
+            ext_suffix = ext
+            name = name[:-len(ext)].strip()
+            break
+
+    detected_type = "General"
+
+    match = re.search(r'\s*\(([^)]+)\)\s*$', name)
+    if match:
+        inside = match.group(1).strip()
+        inside_clean = inside
+        for ext in [".pdf", ".docx", ".doc"]:
+            if inside_clean.lower().endswith(ext):
+                inside_clean = inside_clean[:-len(ext)].strip()
+                break
+        
+        if inside_clean.isdigit():
+            # Numeric duplicate suffix like (1), (2) -> strip out completely
+            name = name[:match.start()].strip()
+        elif inside in VALID_RESUME_TYPES or not inside.isdigit():
+            detected_type = inside
+            name = name[:match.start()].strip()
+
+    clean_base = name.strip()
+    if not clean_base:
+        return ("", "General")
+    if ext_suffix and not clean_base.lower().endswith(ext_suffix.lower()):
+        clean_base = f"{clean_base}{ext_suffix}"
+    
+    return (clean_base, detected_type)
+
 
 class ResumeService:
     def __init__(self):
@@ -24,17 +67,14 @@ class ResumeService:
                 if not isinstance(r, dict):
                     continue
                 name = str(r.get("name") or "")
-                if "(" in name and ")" in name:
-                    r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
-                else:
-                    r["resume_type"] = r.get("resume_type") or "General"
+                file_ext = str(r.get("file_type") or "pdf").lower()
+                clean_base, r_type = extract_clean_name_and_type(name, file_ext)
+                r["resume_type"] = r_type or r.get("resume_type") or "General"
                 
-                # Generate signed URLs for private bucket access if file_path is present
                 file_path = r.get("file_path")
                 if file_path:
                     try:
                         clean_fn = name.replace("/", "_").strip() or "resume"
-                        file_ext = r.get("file_type") or "pdf"
                         if not clean_fn.lower().endswith(f".{file_ext}"):
                             clean_fn = f"{clean_fn}.{file_ext}"
 
@@ -45,10 +85,10 @@ class ResumeService:
                             r["file_url"] = signed_url
                         if download_url:
                             r["download_url"] = download_url
-                    except Exception as url_err:
+                    except Exception:
                         pass
             return resumes
-        except Exception as e:
+        except Exception:
             return []
 
     def get_resume_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
@@ -56,16 +96,14 @@ class ResumeService:
             r = self.repository.get_resume_by_id(resume_id, user_id)
             if r and isinstance(r, dict):
                 name = str(r.get("name") or "")
-                if "(" in name and ")" in name:
-                    r["resume_type"] = name.rsplit("(", 1)[1].replace(")", "").strip()
-                else:
-                    r["resume_type"] = r.get("resume_type") or "General"
+                file_ext = str(r.get("file_type") or "pdf").lower()
+                clean_base, r_type = extract_clean_name_and_type(name, file_ext)
+                r["resume_type"] = r_type or r.get("resume_type") or "General"
                 
                 file_path = r.get("file_path")
                 if file_path:
                     try:
                         clean_fn = name.replace("/", "_").strip() or "resume"
-                        file_ext = r.get("file_type") or "pdf"
                         if not clean_fn.lower().endswith(f".{file_ext}"):
                             clean_fn = f"{clean_fn}.{file_ext}"
 
@@ -97,16 +135,16 @@ class ResumeService:
         content_type = "application/pdf" if ext == "pdf" else ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == "docx" else "application/octet-stream")
         
         public_url = self.repository.upload_file_to_storage("resumes", file_path, file_bytes, content_type)
-        
         parsed_info = self.parser.parse_resume_content(file_bytes, ext)
         
         existing_resumes = self.repository.get_user_resumes(user_id)
         is_primary = len(existing_resumes) == 0
         
         raw_name = filename.rsplit('.', 1)[0]
-        display_name = f"{raw_name} ({resume_type})" if (resume_type and resume_type != "General") else raw_name
+        clean_raw_name, _ = extract_clean_name_and_type(raw_name, ext)
+        display_name = f"{clean_raw_name} ({resume_type})" if (resume_type and resume_type != "General") else clean_raw_name
         
-        clean_fn = raw_name.replace("/", "_").strip() or "resume"
+        clean_fn = clean_raw_name.replace("/", "_").strip() or "resume"
         if not clean_fn.lower().endswith(f".{ext}"):
             clean_fn = f"{clean_fn}.{ext}"
 
@@ -130,7 +168,6 @@ class ResumeService:
         created["download_url"] = download_url or public_url
         return created
 
-
     def set_primary_resume(self, resume_id: str, user_id: str) -> bool:
         return self.repository.set_primary_resume(resume_id, user_id)
 
@@ -141,27 +178,29 @@ class ResumeService:
             raise HTTPException(status_code=404, detail="Resume not found")
         
         update_data = resume_update.model_dump(exclude_unset=True)
-        resume_type = update_data.pop("resume_type", None)
+        new_resume_type = update_data.pop("resume_type", None)
         
         existing_name = str(existing.get("name") or "")
-        old_type = None
-        if "(" in existing_name and ")" in existing_name:
-            base_name, old_type_str = existing_name.rsplit("(", 1)
-            base_name = base_name.strip()
-            old_type = old_type_str.replace(")", "").strip()
-        else:
-            base_name = existing_name.strip()
+        existing_file_type = str(existing.get("file_type") or "pdf").lower()
+        
+        old_base, old_type = extract_clean_name_and_type(existing_name, existing_file_type)
 
         if "name" in update_data and update_data["name"] is not None:
-            clean_name = str(update_data["name"]).strip()
-            if "(" in clean_name and ")" in clean_name:
-                clean_name = clean_name.rsplit("(", 1)[0].strip()
-            if not clean_name:
+            input_name = str(update_data["name"]).strip()
+            if not input_name:
                 from fastapi import HTTPException
                 raise HTTPException(status_code=400, detail="Resume name cannot be empty")
-            base_name = clean_name
+            new_base, input_type = extract_clean_name_and_type(input_name, existing_file_type)
+            if not new_base:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Resume name cannot be empty")
+            base_name = new_base
+            if new_resume_type is None and input_type != "General":
+                new_resume_type = input_type
+        else:
+            base_name = old_base
 
-        target_type = resume_type if resume_type is not None else old_type
+        target_type = new_resume_type if new_resume_type is not None else old_type
         if target_type and target_type != "General":
             final_name = f"{base_name} ({target_type})"
         else:
@@ -176,10 +215,8 @@ class ResumeService:
 
         # Format synthetic resume_type and signed URLs
         r_name = str(updated.get("name") or "")
-        if "(" in r_name and ")" in r_name:
-            updated["resume_type"] = r_name.rsplit("(", 1)[1].replace(")", "").strip()
-        else:
-            updated["resume_type"] = target_type or "General"
+        clean_r_name, r_type = extract_clean_name_and_type(r_name, existing_file_type)
+        updated["resume_type"] = r_type or target_type or "General"
 
         file_path = updated.get("file_path")
         if file_path:

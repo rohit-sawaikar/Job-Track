@@ -33,6 +33,19 @@ const RESUME_TYPES = [
   'Data Science',
 ];
 
+const getCleanEditName = (name: string, type?: string) => {
+  if (!name) return '';
+  let clean = name.trim();
+  // Strip trailing numeric duplicate suffixes like (1), (2), (3)
+  clean = clean.replace(/\s*\(\d+\)(\.[a-zA-Z0-9]+)?$/i, '$1');
+  // Strip category parens if present e.g. (Technical)
+  if (type && type !== 'General') {
+    const escapedType = type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    clean = clean.replace(new RegExp(`\\s*\\(${escapedType}\\)`, 'i'), '');
+  }
+  return clean.trim();
+};
+
 export default function ResumesPage() {
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loading, setLoading] = useState(true);
@@ -423,7 +436,13 @@ export default function ResumesPage() {
                         Manage
                       </div>
                       <button
-                        onClick={() => { setEditingId(r.id); setEditName(r.name); setEditType(r.resume_type || 'General'); setMenuOpen(null); }}
+                        onClick={() => {
+                          const cleanName = getCleanEditName(r.name, r.resume_type);
+                          setEditingId(r.id);
+                          setEditName(cleanName);
+                          setEditType(r.resume_type || 'General');
+                          setMenuOpen(null);
+                        }}
                         style={{
                           width: '100%',
                           display: 'flex',

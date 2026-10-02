@@ -4,7 +4,7 @@ from fastapi import HTTPException
 
 from backend.app.schemas.resume import ResumeUpdate
 from backend.app.repositories.resume_repository import ALLOWED_RESUME_COLUMNS
-from backend.app.services.resume_service import ResumeService
+from backend.app.services.resume_service import ResumeService, extract_clean_name_and_type
 
 
 class TestResumeRenameLogic(unittest.TestCase):
@@ -15,6 +15,16 @@ class TestResumeRenameLogic(unittest.TestCase):
         self.assertIn('name', ALLOWED_RESUME_COLUMNS)
         self.assertIn('file_url', ALLOWED_RESUME_COLUMNS)
         self.assertIn('file_path', ALLOWED_RESUME_COLUMNS)
+
+    def test_extract_clean_name_and_type_strips_numeric_suffixes(self):
+        """Verify extract_clean_name_and_type strips numeric duplicate suffixes like (1), (2)."""
+        name, rtype = extract_clean_name_and_type("17256820239839 (1).pdf", "pdf")
+        self.assertEqual(name, "17256820239839.pdf")
+        self.assertEqual(rtype, "General")
+
+        name2, rtype2 = extract_clean_name_and_type("My Resume (Technical)", "pdf")
+        self.assertEqual(name2, "My Resume")
+        self.assertEqual(rtype2, "Technical")
 
     def test_update_resume_not_found(self):
         """Ensure updating a non-existent or unauthorized resume raises 404."""
@@ -64,14 +74,12 @@ class TestResumeRenameLogic(unittest.TestCase):
             ResumeUpdate(name="Senior Software Engineer", resume_type="Technical")
         )
 
-        # Verify repository received 'Senior Software Engineer (Technical)' in name payload
         service.repository.update_resume.assert_called_once_with(
             "res-1",
             "user-123",
             {"name": "Senior Software Engineer (Technical)"}
         )
 
-        # Verify returned dictionary contains synthetic resume_type field
         self.assertEqual(result["name"], "Senior Software Engineer (Technical)")
         self.assertEqual(result["resume_type"], "Technical")
 
@@ -107,6 +115,40 @@ class TestResumeRenameLogic(unittest.TestCase):
             {"name": "Frontend Lead (Management)"}
         )
         self.assertEqual(result["resume_type"], "Management")
+
+    def test_update_resume_strips_numeric_duplicate_suffix(self):
+        """Ensure renaming '17256820239839 (1).pdf' to 'Resume' yields 'Resume.pdf' without '(1)' suffix."""
+        service = ResumeService()
+        service.repository = MagicMock()
+        service.repository.get_resume_by_id.return_value = {
+            "id": "res-3",
+            "user_id": "user-123",
+            "name": "17256820239839 (1).pdf",
+            "file_path": "user-123/17256820239839.pdf",
+            "file_type": "pdf"
+        }
+        service.repository.update_resume.return_value = {
+            "id": "res-3",
+            "user_id": "user-123",
+            "name": "Resume",
+            "file_path": "user-123/17256820239839.pdf",
+            "file_type": "pdf"
+        }
+        service.repository.get_signed_url.return_value = "https://example.com/signed.pdf"
+
+        result = service.update_resume(
+            "res-3",
+            "user-123",
+            ResumeUpdate(name="Resume")
+        )
+
+        service.repository.update_resume.assert_called_once_with(
+            "res-3",
+            "user-123",
+            {"name": "Resume"}
+        )
+        self.assertEqual(result["name"], "Resume")
+        self.assertEqual(result["resume_type"], "General")
 
 
 if __name__ == "__main__":
