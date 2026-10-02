@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 ALLOWED_RESUME_COLUMNS = {
-    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'resume_type', 'is_primary', 'created_at', 'updated_at'
+    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'is_primary', 'content_text', 'skills', 'parsed_data', 'created_at', 'updated_at'
 }
 
 class ResumeRepository(BaseRepository):
@@ -55,7 +55,9 @@ class ResumeRepository(BaseRepository):
             return self.get_resume_by_id(resume_id, user_id)
         try:
             res = self.client.from_('resumes').update(db_payload).eq('id', resume_id).eq('user_id', user_id).execute()
-            return res.data[0] if res.data else self.get_resume_by_id(resume_id, user_id)
+            if res and hasattr(res, 'data') and res.data and len(res.data) > 0:
+                return res.data[0]
+            return self.get_resume_by_id(resume_id, user_id)
         except Exception as e:
             logger.error(f"Error updating resume {resume_id} for user {user_id}: {e}")
             raise e

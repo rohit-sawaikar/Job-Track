@@ -141,17 +141,64 @@ class ResumeService:
             raise HTTPException(status_code=404, detail="Resume not found")
         
         update_data = resume_update.model_dump(exclude_unset=True)
+        resume_type = update_data.pop("resume_type", None)
+        
+        existing_name = str(existing.get("name") or "")
+        old_type = None
+        if "(" in existing_name and ")" in existing_name:
+            base_name, old_type_str = existing_name.rsplit("(", 1)
+            base_name = base_name.strip()
+            old_type = old_type_str.replace(")", "").strip()
+        else:
+            base_name = existing_name.strip()
+
         if "name" in update_data and update_data["name"] is not None:
             clean_name = str(update_data["name"]).strip()
+            if "(" in clean_name and ")" in clean_name:
+                clean_name = clean_name.rsplit("(", 1)[0].strip()
             if not clean_name:
                 from fastapi import HTTPException
                 raise HTTPException(status_code=400, detail="Resume name cannot be empty")
-            update_data["name"] = clean_name
+            base_name = clean_name
+
+        target_type = resume_type if resume_type is not None else old_type
+        if target_type and target_type != "General":
+            final_name = f"{base_name} ({target_type})"
+        else:
+            final_name = base_name
+
+        update_data["name"] = final_name
 
         updated = self.repository.update_resume(resume_id, user_id, update_data)
-        if not updated:
+        if not updated or not isinstance(updated, dict):
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail="Failed to update resume")
+
+        # Format synthetic resume_type and signed URLs
+        r_name = str(updated.get("name") or "")
+        if "(" in r_name and ")" in r_name:
+            updated["resume_type"] = r_name.rsplit("(", 1)[1].replace(")", "").strip()
+        else:
+            updated["resume_type"] = target_type or "General"
+
+        file_path = updated.get("file_path")
+        if file_path:
+            try:
+                clean_fn = r_name.replace("/", "_").strip() or "resume"
+                file_ext = updated.get("file_type") or "pdf"
+                if not clean_fn.lower().endswith(f".{file_ext}"):
+                    clean_fn = f"{clean_fn}.{file_ext}"
+
+                signed_url = self.repository.get_signed_url("resumes", file_path, download=False)
+                download_url = self.repository.get_signed_url("resumes", file_path, download=True, filename=clean_fn)
+
+                if signed_url:
+                    updated["file_url"] = signed_url
+                if download_url:
+                    updated["download_url"] = download_url
+            except Exception:
+                pass
+
         return updated
 
     def delete_resume(self, resume_id: str, user_id: str) -> bool:
