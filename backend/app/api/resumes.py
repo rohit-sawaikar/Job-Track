@@ -142,9 +142,12 @@ async def view_resume(
         raise HTTPException(status_code=404, detail="Resume not found")
 
     file_path = resume.get("file_path")
-    if not file_path:
+    if not file_path or not isinstance(file_path, str):
         raise HTTPException(status_code=404, detail="Resume file path missing")
     
+    if not file_path.startswith(f"{user_id}/"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage path ownership violation")
+
     file_bytes = resume_service.repository.download_file_from_storage("resumes", file_path)
     if not file_bytes:
         raise HTTPException(
@@ -174,8 +177,11 @@ async def download_resume(resume_id: str, current_user: CurrentUser = Depends(ge
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
     file_path = resume.get("file_path")
-    if not file_path:
+    if not file_path or not isinstance(file_path, str):
         raise HTTPException(status_code=404, detail="Resume file path missing")
+
+    if not file_path.startswith(f"{current_user.id}/"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage path ownership violation")
     
     file_bytes = resume_service.repository.download_file_from_storage("resumes", file_path)
     if not file_bytes:

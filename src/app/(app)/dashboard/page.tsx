@@ -36,14 +36,23 @@ interface AnalysisItem {
 }
 
 export default function DashboardPage() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const [stats, setStats] = useState<Stats>({ total: 0, saved: 0, applied: 0, screening: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 });
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [recentAnalyses, setRecentAnalyses] = useState<AnalysisItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) {
+      setStats({ total: 0, saved: 0, applied: 0, screening: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 });
+      setRecentJobs([]);
+      setRecentAnalyses([]);
+      setLoading(false);
+      return;
+    }
+
     const fetchData = async () => {
+      setLoading(true);
       try {
         const jobs: Job[] = await apiClient.getJobs();
         if (jobs) {
@@ -54,20 +63,26 @@ export default function DashboardPage() {
           });
           setStats(s);
           setRecentJobs(jobs.slice(0, 5));
+        } else {
+          setRecentJobs([]);
         }
 
         const analyses: AnalysisItem[] = await apiClient.getAnalyses();
         if (analyses) {
           setRecentAnalyses(analyses.slice(0, 4));
+        } else {
+          setRecentAnalyses([]);
         }
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
+        setRecentJobs([]);
+        setRecentAnalyses([]);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [user]);
 
 
   const statCards = [

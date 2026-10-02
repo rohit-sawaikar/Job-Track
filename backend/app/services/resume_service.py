@@ -251,6 +251,13 @@ class ResumeService:
         return updated
 
     def delete_resume(self, resume_id: str, user_id: str) -> bool:
+        existing = self.repository.get_resume_by_id(resume_id, user_id)
+        if not existing:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Resume not found")
+        file_path = existing.get("file_path")
+        if file_path and isinstance(file_path, str) and file_path.startswith(f"{user_id}/"):
+            self.repository.delete_file_from_storage("resumes", file_path)
         return self.repository.delete_resume(resume_id, user_id)
 
     def parse_resume_content(self, file_content: bytes, filename: str) -> Dict[str, Any]:

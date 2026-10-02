@@ -62,20 +62,31 @@ export default function ResumesPage() {
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const fetchResumes = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setResumes([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
       const data = await apiClient.getResumes();
       if (data) setResumes(data as Resume[]);
     } catch (err: unknown) {
       console.error(err);
+      setResumes([]);
     } finally {
       setLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      setResumes([]);
+      setLoading(false);
+      return;
+    }
     fetchResumes();
-  }, [fetchResumes]);
+  }, [user, fetchResumes]);
 
   // Click outside & Escape key listener for menu
   useEffect(() => {
