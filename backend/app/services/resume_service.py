@@ -157,15 +157,27 @@ class ResumeService:
             "file_path": file_path,
             "file_type": ext,
             "file_size": len(file_bytes),
-            "is_primary": is_primary,
-            "content_text": parsed_info.get("cleaned_text") or parsed_info.get("raw_text"),
-            "skills": parsed_info.get("extracted_skills", []),
-            "parsed_data": parsed_info
+            "is_primary": is_primary
         }
-        created = self.repository.create_resume(user_id, resume_data)
+        try:
+            created = self.repository.create_resume(user_id, resume_data)
+        except Exception as create_err:
+            self.repository.delete_file_from_storage("resumes", file_path)
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail=f"Failed to save resume record: {str(create_err)}")
+
+        if not created or not isinstance(created, dict):
+            self.repository.delete_file_from_storage("resumes", file_path)
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="Failed to save resume record")
+
         created["resume_type"] = resume_type
         created["file_url"] = inline_url or public_url
         created["download_url"] = download_url or public_url
+        if parsed_info.get("cleaned_text") or parsed_info.get("raw_text"):
+            created["content_text"] = parsed_info.get("cleaned_text") or parsed_info.get("raw_text")
+        if parsed_info.get("extracted_skills"):
+            created["skills"] = parsed_info.get("extracted_skills")
         return created
 
     def set_primary_resume(self, resume_id: str, user_id: str) -> bool:

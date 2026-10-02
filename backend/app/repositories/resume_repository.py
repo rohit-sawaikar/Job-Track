@@ -1,11 +1,14 @@
 import logging
-from app.repositories.base_repository import BaseRepository
+try:
+    from app.repositories.base_repository import BaseRepository
+except ImportError:
+    from backend.app.repositories.base_repository import BaseRepository
 from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_RESUME_COLUMNS = {
-    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'is_primary', 'content_text', 'skills', 'parsed_data', 'created_at', 'updated_at'
+    'id', 'user_id', 'name', 'file_path', 'file_url', 'file_size', 'file_type', 'is_primary', 'created_at', 'updated_at'
 }
 
 class ResumeRepository(BaseRepository):

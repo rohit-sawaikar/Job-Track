@@ -9,8 +9,11 @@ from backend.app.services.resume_service import ResumeService, extract_clean_nam
 
 class TestResumeRenameLogic(unittest.TestCase):
 
-    def test_allowed_columns_excludes_resume_type(self):
-        """Ensure resume_type is NOT in database column list to prevent PostgREST 500 errors."""
+    def test_allowed_columns_excludes_non_existent_fields(self):
+        """Ensure non-existent schema fields (content_text, skills, parsed_data, resume_type) are excluded from ALLOWED_RESUME_COLUMNS."""
+        self.assertNotIn('content_text', ALLOWED_RESUME_COLUMNS)
+        self.assertNotIn('skills', ALLOWED_RESUME_COLUMNS)
+        self.assertNotIn('parsed_data', ALLOWED_RESUME_COLUMNS)
         self.assertNotIn('resume_type', ALLOWED_RESUME_COLUMNS)
         self.assertIn('name', ALLOWED_RESUME_COLUMNS)
         self.assertIn('file_url', ALLOWED_RESUME_COLUMNS)

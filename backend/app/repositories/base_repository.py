@@ -132,5 +132,14 @@ class BaseRepository:
                 )
             return None
 
+    def delete_file_from_storage(self, bucket_name: str, file_path: str) -> bool:
+        """Deletes a file object from Supabase Storage bucket."""
+        try:
+            self.client.storage.from_(bucket_name).remove([file_path])
+            return True
+        except Exception as e:
+            logger.warning(f"Error removing file {file_path} from storage bucket {bucket_name}: {e}")
+            return False
+
 
 
