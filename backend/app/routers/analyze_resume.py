@@ -110,15 +110,21 @@ async def analyze_resume(request: AnalyzeResumeRequest, current_user: CurrentUse
             candidate_name = parsed.get("candidate_name")
 
     # 3. Perform Evidence-Based Analysis via MatchingEngine
-    analysis = MatchingEngine.analyze_resume_against_job(
-        resume_text=resume_text,
-        extracted_skills=extracted_skills,
-        job_title=job_title,
-        company=company,
-        job_description=jd_text,
-        required_skills=req_skills,
-        preferred_skills=pref_skills,
-        candidate_name=candidate_name
-    )
+    try:
+        analysis = MatchingEngine.analyze_resume_against_job(
+            resume_text=resume_text,
+            extracted_skills=extracted_skills,
+            job_title=job_title,
+            company=company,
+            job_description=jd_text,
+            required_skills=req_skills,
+            preferred_skills=pref_skills,
+            candidate_name=candidate_name
+        )
+        return analysis
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as exc:
+        logger.error(f"Analysis failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
-    return analysis

@@ -58,11 +58,12 @@ export default function DashboardPage() {
         if (jobs) {
           const s: Stats = { total: jobs.length, saved: 0, applied: 0, screening: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 };
           jobs.forEach(j => {
-            const key = j.status as keyof Stats;
+            const key = (j.status || '').toLowerCase() as keyof Stats;
             if (key in s && key !== 'total') s[key]++;
           });
           setStats(s);
           setRecentJobs(jobs.slice(0, 5));
+
         } else {
           setRecentJobs([]);
         }
@@ -190,7 +191,8 @@ export default function DashboardPage() {
                     <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{job.title}</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{job.company || 'Company not specified'}</div>
                   </div>
-                  <span className={`status-badge status-${job.status}`}>{job.status}</span>
+                  <span className={`status-badge status-${(job.status || '').toLowerCase()}`}>{job.status}</span>
+
                 </Link>
               ))}
             </div>

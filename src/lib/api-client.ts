@@ -76,6 +76,20 @@ class PythonApiClient {
     return res.json();
   }
 
+  async checkDuplicateJob(data: { title: string; company?: string; job_url?: string; application_url?: string }) {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/py/jobs/check-duplicate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to check duplicate job');
+    }
+    return res.json();
+  }
+
   async createJob(jobData: any) {
     const headers = await this.getAuthHeaders();
     const res = await fetch('/api/py/jobs', {
@@ -89,6 +103,7 @@ class PythonApiClient {
     }
     return res.json();
   }
+
 
 
   async updateJob(id: string, jobData: any) {

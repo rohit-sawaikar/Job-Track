@@ -296,7 +296,7 @@ class MatchingEngine:
 
     @classmethod
     def extract_job_skills_if_empty(cls, job_text: str, req_skills: List[str], pref_skills: List[str]):
-        """Extract required and preferred skills preserving JD categories."""
+        """Extract required and preferred skills preserving JD categories without hallucinating defaults."""
         if req_skills or pref_skills:
             return req_skills, pref_skills
         
@@ -304,11 +304,91 @@ class MatchingEngine:
         req = [item["name"] for item in canonical if item["requirement"] == "required"]
         pref = [item["name"] for item in canonical if item["requirement"] == "preferred"]
 
-        if not req and not pref:
-            req = ["Python", "CI/CD", "Git"]
-            pref = ["Docker", "Kubernetes", "AWS"]
-            
         return req, pref
+
+    @classmethod
+    def classify_jd_quality(cls, job_text: str, job_title: str, canonical_reqs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Deterministically classifies job description quality as sufficient, limited, or insufficient."""
+        text_clean = (job_text or "").strip()
+        if not text_clean:
+            return {
+                "quality": "insufficient",
+                "quality_reasons": ["Job description text is empty or whitespace-only."],
+                "missing_fields": ["Job Responsibilities", "Required Technical Skills", "Experience Requirements", "Education Requirements", "Location & Work Arrangement"],
+                "is_score_reliable": False,
+                "score_suppressed": True,
+                "confidence": 0
+            }
+
+        words = re.findall(r'\b\w+\b', text_clean)
+        word_count = len(words)
+        req_count = len(canonical_reqs)
+        
+        has_responsibilities = bool(re.search(r'\b(?:responsibilities|duties|what you\'?ll do|role overview|day to day|key tasks|key responsibilities)\b', text_clean, re.IGNORECASE))
+        has_education = any(k in text_clean.lower() for k in ["bachelor", "master", "phd", "degree", "bs", "b.s", "b.tech", "b.e", "bca"])
+        has_experience_details = bool(re.search(r'\b(?:\d+[\s\-\–to]*\d*\s*years?|\d+\+\s*years?|years?\s+of\s+(?:software\s+)?development|years?\s+of\s+experience)\b', text_clean, re.IGNORECASE))
+        has_location_mode = bool(re.search(r'\b(?:remote|hybrid|on-site|onsite|in-office|location|pune|mumbai|bangalore|san francisco|new york|chicago|london|seattle|austin|delhi)\b', text_clean, re.IGNORECASE))
+
+        missing_fields = []
+        if not has_responsibilities:
+            missing_fields.append("Job Responsibilities")
+        if req_count == 0:
+            missing_fields.append("Required Technical Skills")
+        if not has_experience_details:
+            missing_fields.append("Experience Requirements")
+        if not has_education:
+            missing_fields.append("Education Requirements")
+        if not has_location_mode:
+            missing_fields.append("Location & Work Arrangement")
+
+        # Insufficient criteria
+        if word_count < 6 or len(text_clean) < 25:
+            return {
+                "quality": "insufficient",
+                "quality_reasons": ["Input contains minimal or ambiguous text without actionable job requirements or role context."],
+                "missing_fields": missing_fields,
+                "is_score_reliable": False,
+                "score_suppressed": True,
+                "confidence": 15
+            }
+        
+        if req_count == 0 and not has_responsibilities:
+            return {
+                "quality": "insufficient",
+                "quality_reasons": ["Text contains insufficient technical requirements or role responsibilities for a meaningful match."],
+                "missing_fields": missing_fields,
+                "is_score_reliable": False,
+                "score_suppressed": True,
+                "confidence": 20
+            }
+
+
+        # Limited criteria
+        if word_count < 35 or req_count <= 3 or (not has_responsibilities and not has_education):
+            reasons = []
+            if req_count > 0:
+                reasons.append(f"Contains minimal information ({req_count} extracted requirement(s)).")
+            if missing_fields:
+                reasons.append(f"Missing structured sections: {', '.join(missing_fields[:3])}.")
+            return {
+                "quality": "limited",
+                "quality_reasons": reasons or ["Job description provides limited detail."],
+                "missing_fields": missing_fields,
+                "is_score_reliable": True,
+                "score_suppressed": False,
+                "confidence": 55
+            }
+
+        # Sufficient criteria
+        return {
+            "quality": "sufficient",
+            "quality_reasons": ["Job description provides complete requirement specifications."],
+            "missing_fields": missing_fields,
+            "is_score_reliable": True,
+            "score_suppressed": False,
+            "confidence": 90
+        }
+
 
     @classmethod
     def extract_skill_jd_requirement(cls, skill: str, job_text: str) -> str:
@@ -671,6 +751,13 @@ class MatchingEngine:
     ) -> Dict[str, Any]:
         """Calculates candidate match score with complete traceability across 4 independent dimensions."""
         
+        # Input length and validity enforcement
+        if not job_text or not job_text.strip():
+            raise ValueError("Job description text cannot be empty or whitespace-only.")
+
+        if len(job_text) > 50000:
+            raise ValueError("Job description text exceeds maximum allowed length of 50,000 characters.")
+
         # 0. Extract job title from JD text if generic
         if job_title == "Target Position" or not job_title or job_title == "Target Job":
             extracted_title = cls.extract_job_title_from_jd(job_text)
@@ -679,6 +766,10 @@ class MatchingEngine:
 
         # Build Canonical Requirements
         canonical_reqs = cls.extract_canonical_requirements(job_text)
+        
+        # Classify JD Quality
+        quality_info = cls.classify_jd_quality(job_text, job_title, canonical_reqs)
+
         
         all_skill_evals: List[Dict[str, Any]] = []
         res_text_lower = resume_text.lower()
@@ -874,22 +965,40 @@ class MatchingEngine:
         str_text = ", ".join(strengths[:3]) if strengths else "core technical skills"
         gap_text = ", ".join(gaps[:3]) if gaps else "preferred technical areas"
 
-        if rec == "proceed":
-            summary = f"**Strong Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}."
-        elif rec == "review":
-            if gaps:
-                summary = f"**Possible Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}. The resume does not explicitly document {gap_text}."
-            else:
-                summary = f"**Possible Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}."
+        # Apply JD Quality adjustments to overall score & summary
+        score_suppressed = quality_info["score_suppressed"]
+        is_score_reliable = quality_info["is_score_reliable"]
+        missing_information = quality_info["missing_fields"]
+        missing_str = ", ".join(missing_information[:3]) if missing_information else "role details"
+
+        if quality_info["quality"] == "insufficient":
+            overall_score = None
+            score_suppressed = True
+            is_score_reliable = False
+            rating = "Insufficient Information"
+            rec = "review"
+            summary = f"**Insufficient Information for Overall Score** — The job description provides too little detail to generate a reliable overall match score. Missing key fields: {missing_str}. You can provide a more detailed job description or analyze available information."
+        elif quality_info["quality"] == "limited":
+            rating = f"Limited Match ({tech_score}% Skill Fit)" if tech_score > 0 else "Limited Match"
+            summary = f"**Limited Match Assessment for {target_display}** — Preliminary match score measures {len(req_evals)} extracted skill requirement(s). Prominent limitation: Missing fields ({missing_str}) limit full assessment depth."
         else:
-            summary = f"**Weak Match for {target_display}** — {cand_name_str} demonstrates limited documented alignment with the {clean_title} role, with notable skill gaps identified in {gap_text}."
+            if rec == "proceed":
+                summary = f"**Strong Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}."
+            elif rec == "review":
+                if gaps:
+                    summary = f"**Possible Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}. The resume does not explicitly document {gap_text}."
+                else:
+                    summary = f"**Possible Match for {target_display}** — {cand_name_str} demonstrates documented alignment with the {clean_title} role through verified evidence in {str_text}."
+            else:
+                summary = f"**Weak Match for {target_display}** — {cand_name_str} demonstrates limited documented alignment with the {clean_title} role, with notable skill gaps identified in {gap_text}."
 
         req_found = [s["name"] for s in req_evals if s["status"] in ["match", "partial"]]
         req_missing = [s["name"] for s in req_evals if s["status"] == "gap"]
         pref_found = [s["name"] for s in pref_evals if s["status"] in ["match", "partial"]]
         pref_missing = [s["name"] for s in pref_evals if s["status"] == "gap"]
 
-        interview_readiness = "High" if overall_score >= 75 else ("Medium" if overall_score >= 55 else "Low")
+        interview_readiness = "High" if (overall_score and overall_score >= 75) else ("Medium" if (overall_score and overall_score >= 55) else "Low")
+
 
         # Prioritized 6 Targeted Natural Interview Questions with Intent Deduplication & Post-Validation
         candidate_questions: List[str] = []
@@ -1061,7 +1170,13 @@ class MatchingEngine:
                 "interviewQuestions": interview_questions,
                 "toVerify": to_verify,
                 "recommendation": rec
-            }
+            },
+            "analysisQuality": quality_info["quality"],
+            "qualityReasons": quality_info["quality_reasons"],
+            "missingInformation": missing_information,
+            "isScoreReliable": is_score_reliable,
+            "scoreSuppressed": score_suppressed,
+            "analysisConfidence": quality_info["confidence"]
         }
 
         raw_result = {
@@ -1084,8 +1199,15 @@ class MatchingEngine:
             "matched_requirements": [{"name": s["name"], "detail": s["evidence"]} for s in all_skill_evals if s["status"] in ["match", "partial"]],
             "missing_requirements": [{"name": s["name"], "detail": s["evidence"]} for s in all_skill_evals if s["status"] == "gap"],
             "partial_requirements": [{"name": s["name"], "detail": s["evidence"]} for s in all_skill_evals if s["status"] == "partial"],
+            "analysis_quality": quality_info["quality"],
+            "quality_reasons": quality_info["quality_reasons"],
+            "missing_information": missing_information,
+            "is_score_reliable": is_score_reliable,
+            "score_suppressed": score_suppressed,
+            "analysis_confidence": quality_info["confidence"],
             "assessment": structured_assessment
         }
+
 
         return EvidenceSanitizer.validate_and_sanitize_analysis_result(
             raw_result,

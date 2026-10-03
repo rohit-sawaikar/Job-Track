@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Sparkles, Check, X, AlertCircle, Loader2, Award, Zap, ChevronRight,
@@ -45,7 +45,7 @@ interface StructuredAssessment {
   candidate: CandidateContext;
   role: RoleContext;
   generatedAt: string;
-  overallScore: number;
+  overallScore?: number | null;
   dimensions: Dimension[];
   skills: SkillItem[];
   insights: {
@@ -57,10 +57,16 @@ interface StructuredAssessment {
     toVerify?: string[];
     recommendation: 'proceed' | 'review' | 'reject' | string;
   };
+  analysisQuality?: 'sufficient' | 'limited' | 'insufficient';
+  qualityReasons?: string[];
+  missingInformation?: string[];
+  isScoreReliable?: boolean;
+  scoreSuppressed?: boolean;
+  analysisConfidence?: number;
 }
 
 interface AnalysisResult {
-  match_score: number;
+  match_score?: number | null;
   recommendation_rating: string;
   skills_match_percent: number;
   experience_match_percent: number;
@@ -76,8 +82,15 @@ interface AnalysisResult {
   interview_readiness: string;
   recommendations: string[];
   short_summary: string;
+  analysis_quality?: 'sufficient' | 'limited' | 'insufficient';
+  quality_reasons?: string[];
+  missing_information?: string[];
+  is_score_reliable?: boolean;
+  score_suppressed?: boolean;
+  analysis_confidence?: number;
   assessment?: StructuredAssessment;
 }
+
 
 const DEMO_ASSESSMENT: AnalysisResult = {
   match_score: 82,
@@ -209,10 +222,14 @@ function AnalyzerContent() {
 
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCalcDetails, setShowCalcDetails] = useState(false);
   const [skillFilter, setSkillFilter] = useState<'all' | 'match' | 'partial' | 'gap' | 'insufficient'>('all');
+
+  const requestSeqRef = useRef<number>(0);
+  const jdInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const fetchResumes = useCallback(async () => {
     try {
@@ -234,6 +251,11 @@ function AnalyzerContent() {
     fetchResumes();
   }, [fetchResumes]);
 
+  // Clean state when selected resume changes to prevent cross-candidate state leakage
+  useEffect(() => {
+    setResult(null);
+  }, [selectedResume]);
+
   useEffect(() => {
     if (jobIdParam) {
       const fetchJob = async () => {
@@ -253,6 +275,13 @@ function AnalyzerContent() {
     }
   }, [jobIdParam]);
 
+  const scrollToInput = () => {
+    if (jdInputRef.current) {
+      jdInputRef.current.focus();
+      jdInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   const analyze = async () => {
     if (!selectedResume) {
       toast.error('Please select a candidate resume');
@@ -262,9 +291,16 @@ function AnalyzerContent() {
       toast.error('Please paste complete job description details');
       return;
     }
+    if (rawJobText.length > 50000) {
+      toast.error('Job description text exceeds 50,000 characters limit.');
+      return;
+    }
+
+    const currentSeq = ++requestSeqRef.current;
 
     setAnalyzing(true);
     setAnalyzeError(false);
+    setErrorMessage(null);
     setResult(null);
 
     try {
@@ -276,15 +312,31 @@ function AnalyzerContent() {
         jobId,
       });
 
-      setResult(data);
-      toast.success('Candidate Match Analysis Complete!');
+      // Guard against stale response if user submitted again while previous request was in flight
+      if (currentSeq === requestSeqRef.current) {
+        setResult(data);
+        if (data.analysis_quality === 'insufficient') {
+          toast.error('Job Description quality is insufficient for an overall score.', { duration: 5000 });
+        } else if (data.analysis_quality === 'limited') {
+          toast('Limited Job Description detected. Preliminary analysis complete.', { icon: '⚠️', duration: 4000 });
+        } else {
+          toast.success('Candidate Match Analysis Complete!');
+        }
+      }
     } catch (err: unknown) {
-      setAnalyzeError(true);
-      toast.error(err instanceof Error ? err.message : 'Analysis failed');
+      if (currentSeq === requestSeqRef.current) {
+        setAnalyzeError(true);
+        const msg = err instanceof Error ? err.message : 'Analysis failed';
+        setErrorMessage(msg);
+        toast.error(msg);
+      }
     } finally {
-      setAnalyzing(false);
+      if (currentSeq === requestSeqRef.current) {
+        setAnalyzing(false);
+      }
     }
   };
+
 
   const loadDemoState = () => {
     setResult(DEMO_ASSESSMENT);
@@ -419,8 +471,14 @@ function AnalyzerContent() {
         </div>
 
         <div className="form-group" style={{ marginBottom: 20 }}>
-          <label className="form-label form-required">Job Description & Requirements</label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <label className="form-label form-required" style={{ marginBottom: 0 }}>Job Description & Requirements</label>
+            <span style={{ fontSize: '0.78rem', color: rawJobText.length > 50000 ? 'var(--accent-danger)' : 'var(--text-tertiary)', fontWeight: 600 }}>
+              {rawJobText.length.toLocaleString()} / 50,000 chars {rawJobText.length > 50000 ? '(Exceeds Limit)' : ''}
+            </span>
+          </div>
           <textarea
+            ref={jdInputRef}
             className="form-textarea"
             rows={5}
             placeholder="Paste complete job requirements, required skills, and responsibilities..."
@@ -429,7 +487,7 @@ function AnalyzerContent() {
           />
         </div>
 
-        <button className="btn btn-ai btn-lg" onClick={analyze} disabled={analyzing || resumes.length === 0 || !rawJobText.trim()} style={{ width: '100%' }}>
+        <button className="btn btn-ai btn-lg" onClick={analyze} disabled={analyzing || resumes.length === 0 || !rawJobText.trim() || rawJobText.length > 50000} style={{ width: '100%' }}>
           {analyzing ? (
             <><Loader2 size={20} className="animate-spin" /> Evaluating Candidate Fit with Weighted Intelligence Engine...</>
           ) : (
@@ -449,11 +507,84 @@ function AnalyzerContent() {
             'Finalizing results',
           ]}
         />
+
+        {analyzeError && (
+          <div style={{ marginTop: 20, padding: 16, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-danger)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <AlertCircle size={20} color="var(--accent-danger)" />
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+                {errorMessage || 'Analysis failed due to a server error or invalid input format.'}
+              </span>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={analyze}>
+              Retry Analysis
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Quality Warning Banner Cards */}
+      {result && result.analysis_quality === 'insufficient' && (
+        <div className="card animate-in" style={{ marginBottom: 24, padding: 24, borderLeft: '5px solid var(--accent-danger)', background: 'var(--bg-tertiary)' }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <AlertCircle size={28} color="var(--accent-danger)" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
+                Insufficient Job Description Notice
+              </div>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+                The job description text provided is too minimal or generic to compute a reliable overall match score.
+                {result.missing_information && result.missing_information.length > 0 && (
+                  <span style={{ display: 'block', marginTop: 6, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Missing Information: {result.missing_information.join(', ')}
+                  </span>
+                )}
+              </p>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary btn-sm" onClick={scrollToInput} style={{ background: 'var(--accent-danger)', color: '#fff', border: 'none' }}>
+                  Add Job Description Details
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && result.analysis_quality === 'limited' && (
+        <div className="card animate-in" style={{ marginBottom: 24, padding: 24, borderLeft: '5px solid var(--accent-warning)', background: 'var(--bg-tertiary)' }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <AlertTriangle size={28} color="var(--accent-warning)" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
+                Limited Job Description Notice
+              </div>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+                This job description contains basic skills but lacks structured sections (such as explicit responsibilities or education requirements).
+                {result.missing_information && result.missing_information.length > 0 && (
+                  <span style={{ display: 'block', marginTop: 6, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Limitation Factors: {result.missing_information.join(', ')}
+                  </span>
+                )}
+              </p>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary btn-sm" onClick={scrollToInput}>
+                  Improve Job Description
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => {
+                  const el = document.getElementById('match-details-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}>
+                  Analyze Available Information ↓
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Structured Candidate Match Dashboard */}
       {result && (
-        <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <div id="match-details-section" className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           
           {/* Section 1: Candidate & Role Context Header + Hero Summary Card */}
           <div className="card" style={{ padding: '28px', borderLeft: '4px solid var(--accent-primary)' }}>
@@ -465,6 +596,7 @@ function AnalyzerContent() {
                   <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>{roleTitle}</h2>
                   {roleCompany && <span style={{ fontSize: '1.1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>at {roleCompany}</span>}
                 </div>
+
 
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -490,9 +622,13 @@ function AnalyzerContent() {
 
             {/* Score Ring & Hero Summary */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', background: 'var(--bg-tertiary)', padding: '20px 24px', borderRadius: 'var(--radius-lg)' }}>
-              <div className="score-circle" style={{ flexShrink: 0, width: 100, height: 100, borderWidth: 6 }}>
-                <div className="score-value" style={{ fontSize: '2rem' }}>{result.match_score}%</div>
-                <div className="score-label">OVERALL</div>
+              <div className="score-circle" style={{ flexShrink: 0, width: 100, height: 100, borderWidth: 6, borderColor: result.score_suppressed ? 'var(--accent-warning)' : undefined }}>
+                <div className="score-value" style={{ fontSize: result.score_suppressed || result.match_score == null ? '1.5rem' : '2rem' }}>
+                  {result.score_suppressed || result.match_score == null ? '--' : `${result.match_score}%`}
+                </div>
+                <div className="score-label" style={{ fontSize: '0.65rem' }}>
+                  {result.score_suppressed ? 'OMITTED' : 'OVERALL'}
+                </div>
               </div>
 
               <div style={{ flex: 1, minWidth: 280 }}>
@@ -504,6 +640,7 @@ function AnalyzerContent() {
                 </p>
               </div>
             </div>
+
           </div>
 
           {/* Section 2: Match Dimensions Breakdown with Accessible Progress Bars */}

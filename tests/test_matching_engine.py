@@ -807,7 +807,17 @@ TempChat
 
     def test_quality_no_subjective_adjectives_in_summary(self):
         """TEST SUMMARY: Hero summary must never contain subjective evaluative adjectives"""
-        jd_text = "Required:\n- Python\n- SQL & Database Operations\n- Git"
+        jd_text = """
+        Job Title: Python Developer
+        Responsibilities:
+        - Design and develop scalable backend microservices in Python
+        - Optimize SQL queries and database operations for PostgreSQL
+        - Manage version control workflows using Git
+        Required Qualifications:
+        - 3+ years experience with Python development
+        - Bachelor's degree in Computer Science or equivalent
+        - Proficiency with Git and SQL databases
+        """
         resume_text = "Rohit Sawaikar\nPython developer with Tkinter and PyQt6 experience."
         assessment = MatchingEngine.calculate_deterministic_assessment(
             resume_skills=["Python", "Tkinter", "PyQt6"],
@@ -824,7 +834,63 @@ TempChat
         self.assertIn("documented alignment", summary)
 
 
+    def test_jd_quality_insufficient_suppresses_score(self):
+        """TEST JD QUALITY: Extremely minimal JD ('Python') must classify as insufficient and suppress score."""
+        jd_text = "Python"
+        resume_text = "Experienced Python engineer with 5 years experience building FastAPI backends."
+        assessment = MatchingEngine.calculate_deterministic_assessment(
+            resume_skills=["Python", "FastAPI"],
+            resume_text=resume_text,
+            req_skills=[],
+            pref_skills=[],
+            job_text=jd_text
+        )
+        self.assertEqual(assessment["analysis_quality"], "insufficient")
+        self.assertTrue(assessment["score_suppressed"])
+        self.assertFalse(assessment["is_score_reliable"])
+        self.assertIsNone(assessment["match_score"])
+        self.assertIn("Insufficient Information", assessment["recommendation_rating"])
+
+    def test_jd_quality_short_description_limited(self):
+        """TEST JD QUALITY: Short description ('Python developer needed.') must classify as limited quality."""
+        jd_text = "Python developer needed."
+        resume_text = "Python developer with experience in Django and Git."
+        assessment = MatchingEngine.calculate_deterministic_assessment(
+            resume_skills=["Python", "Django"],
+            resume_text=resume_text,
+            req_skills=[],
+            pref_skills=[],
+            job_text=jd_text
+        )
+        self.assertIn(assessment["analysis_quality"], ["limited", "insufficient"])
+        self.assertIn("missing_information", assessment)
+        self.assertTrue(len(assessment["missing_information"]) > 0)
+
+    def test_input_validation_empty_and_oversized(self):
+        """TEST INPUT VALIDATION: Empty and oversized (>50,000 chars) JDs must raise ValueError."""
+        resume_text = "Candidate resume text"
+        with self.assertRaises(ValueError):
+            MatchingEngine.calculate_deterministic_assessment(
+                resume_skills=["Python"],
+                resume_text=resume_text,
+                req_skills=[],
+                pref_skills=[],
+                job_text="   "
+            )
+
+        oversized_jd = "Python developer needed. " * 3000  # ~75,000 chars
+        with self.assertRaises(ValueError):
+            MatchingEngine.calculate_deterministic_assessment(
+                resume_skills=["Python"],
+                resume_text=resume_text,
+                req_skills=[],
+                pref_skills=[],
+                job_text=oversized_jd
+            )
+
+
 if __name__ == '__main__':
     unittest.main()
+
 
 

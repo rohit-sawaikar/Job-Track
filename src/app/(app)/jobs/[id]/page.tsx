@@ -99,10 +99,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Link href={`/jobs/${job.id}/edit`} className="btn btn-secondary btn-sm"><Edit3 size={16} /> Edit Job</Link>
                 <button className={`favorite-btn ${job.is_favorite ? 'active' : ''}`} onClick={toggleFav}><Star size={22} fill={job.is_favorite ? '#f59e0b' : 'none'} /></button>
                 <button className="btn btn-danger btn-sm btn-icon" onClick={deleteJob} title="Delete"><Trash2 size={16} /></button>
               </div>
             </div>
+
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
               {statuses.map(s => (

@@ -37,11 +37,17 @@ class CandidateMatchAssessment(BaseModel):
     candidate: CandidateContext
     role: RoleContext
     generatedAt: str
-    overallScore: int
+    overallScore: Optional[int] = None
     dimensions: List[MatchDimension]
     skills: List[SkillComparison]
     insights: AssessmentInsights
     nextSteps: NextSteps
+    analysisQuality: str = "sufficient"  # "sufficient" | "limited" | "insufficient"
+    qualityReasons: List[str] = []
+    missingInformation: List[str] = []
+    isScoreReliable: bool = True
+    scoreSuppressed: bool = False
+    analysisConfidence: int = 100
 
 class AnalysisCreateRequest(BaseModel):
     resume_id: str
@@ -55,7 +61,7 @@ class AnalysisResponse(BaseModel):
     user_id: Optional[str] = None
     job_id: Optional[str] = None
     resume_id: Optional[str] = None
-    match_score: int
+    match_score: Optional[int] = None
     recommendation_rating: str
     skills_match_percent: int
     experience_match_percent: int
@@ -73,4 +79,11 @@ class AnalysisResponse(BaseModel):
     short_summary: str
     created_at: Optional[str] = None
     assessment: Optional[CandidateMatchAssessment] = None
+    analysis_quality: str = "sufficient"
+    quality_reasons: List[str] = []
+    missing_information: List[str] = []
+    is_score_reliable: bool = True
+    score_suppressed: bool = False
+    analysis_confidence: int = 100
+
 

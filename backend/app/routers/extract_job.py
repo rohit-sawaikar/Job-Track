@@ -32,7 +32,10 @@ async def extract_job(request: JobExtractRequest, current_user: CurrentUser = De
         extracted = JobExtractor.extract_job_details(text_content)
         logger.info("[AI Extraction] Returning response to frontend")
         return extracted
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
     except Exception as e:
         logger.error(f"[AI Extraction] Endpoint exception: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"AI extraction internal server error: {str(e)}")
+
 

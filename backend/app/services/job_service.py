@@ -75,3 +75,7 @@ class JobService:
 
     def delete_job(self, job_id: str, user_id: str) -> bool:
         return self.repository.delete_job(job_id, user_id)
+
+    def check_duplicate_job(self, user_id: str, title: str, company: Optional[str] = None, job_url: Optional[str] = None, application_url: Optional[str] = None) -> Dict[str, Any]:
+        return self.repository.check_duplicate_job(user_id, title, company, job_url, application_url)
+

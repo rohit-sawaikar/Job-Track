@@ -134,7 +134,8 @@ function JobsContent() {
         j.skills?.some(s => s.toLowerCase().includes(q))
       );
     }
-    if (statusFilter !== 'all') result = result.filter(j => j.status === statusFilter);
+    if (statusFilter !== 'all') result = result.filter(j => (j.status || '').toLowerCase() === statusFilter.toLowerCase());
+
     if (showFavoritesOnly) result = result.filter(j => j.is_favorite);
     result.sort((a, b) => {
       if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -372,7 +373,8 @@ function JobsContent() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span className={`status-badge status-${job.status}`}>{job.status}</span>
+                    <span className={`status-badge status-${(job.status || '').toLowerCase()}`}>{job.status}</span>
+
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}>
                       <Calendar size={12} />{new Date(job.created_at).toLocaleDateString()}
                     </span>

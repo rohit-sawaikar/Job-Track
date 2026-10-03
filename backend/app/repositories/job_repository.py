@@ -1,4 +1,5 @@
 import logging
+import re
 from app.repositories.base_repository import BaseRepository
 from typing import List, Optional, Dict, Any
 
@@ -67,4 +68,61 @@ class JobRepository(BaseRepository):
         except Exception as e:
             logger.error(f"Error deleting job {job_id} for user {user_id}: {e}")
             return False
+
+    def check_duplicate_job(self, user_id: str, title: str, company: Optional[str] = None, job_url: Optional[str] = None, application_url: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Check for duplicate jobs for a user using normalized title, company, and URLs.
+        """
+        jobs = self.get_user_jobs(user_id)
+        if not jobs:
+            return {"is_duplicate": False, "existing_job": None}
+
+        norm_title = (title or "").strip().lower()
+        norm_company = (company or "").strip().lower()
+
+        clean_urls = []
+        for u in [job_url, application_url]:
+            if u and isinstance(u, str) and u.strip():
+                c_u = u.strip().lower().rstrip('/')
+                c_u = re.sub(r'^https?://', '', c_u)
+                if c_u:
+                    clean_urls.append(c_u)
+
+        for j in jobs:
+            j_title = (j.get("title") or "").strip().lower()
+            j_company = (j.get("company") or "").strip().lower()
+
+            # Check URL match
+            j_urls = []
+            for u in [j.get("job_url"), j.get("application_url")]:
+                if u and isinstance(u, str) and u.strip():
+                    c_u = u.strip().lower().rstrip('/')
+                    c_u = re.sub(r'^https?://', '', c_u)
+                    if c_u:
+                        j_urls.append(c_u)
+
+            url_matched = any(u in j_urls for u in clean_urls) if clean_urls and j_urls else False
+
+            # Check title & company match
+            title_matched = (norm_title == j_title)
+            company_matched = False
+            if norm_company and j_company:
+                company_matched = (norm_company == j_company)
+            elif not norm_company and not j_company:
+                company_matched = True
+
+            if url_matched or (title_matched and company_matched):
+                return {
+                    "is_duplicate": True,
+                    "existing_job": {
+                        "id": j.get("id"),
+                        "title": j.get("title"),
+                        "company": j.get("company"),
+                        "created_at": j.get("created_at"),
+                        "status": j.get("status")
+                    }
+                }
+
+        return {"is_duplicate": False, "existing_job": None}
+
 
