@@ -87,7 +87,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
         {/* Main Content */}
-        <div style={{ flex: '1 1 600px', minWidth: 0 }}>
+        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
               <div>
@@ -175,7 +175,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         </div>
 
         {/* Sidebar - Activity Timeline */}
-        <div style={{ flex: '0 0 300px', minWidth: 280 }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+
           <div className="card">
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Activity Timeline</h3>
             {activities.length === 0 ? (

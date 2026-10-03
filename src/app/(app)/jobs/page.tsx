@@ -206,7 +206,8 @@ function JobsContent() {
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           
           {/* Prominent Search Bar with Live Suggestions */}
-          <div ref={searchContainerRef} style={{ position: 'relative', flex: '1 1 360px', minWidth: 280 }}>
+          <div ref={searchContainerRef} style={{ position: 'relative', flex: '1 1 240px', minWidth: 0 }}>
+
             <div
               style={{
                 display: 'flex',
@@ -364,7 +365,7 @@ function JobsContent() {
                   <Star size={20} fill={job.is_favorite ? '#f59e0b' : 'none'} />
                 </button>
                 <Link href={`/jobs/${job.id}`} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 200 }}>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 4 }}>{job.title}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.8rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
                       {job.company && <span>{job.company}</span>}

@@ -631,7 +631,8 @@ function AnalyzerContent() {
                 </div>
               </div>
 
-              <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+
                 <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
                   Hero Evaluation Summary
                 </div>
