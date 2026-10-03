@@ -445,6 +445,42 @@ a { color: inherit; text-decoration: none; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 
+/* Responsive Breakpoints & Mobile Overrides */
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+}
+
+@media (max-width: 768px) {
+  .page-container { padding: 16px 14px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; gap: 14px; }
+  .card { padding: 16px; border-radius: var(--radius-md); }
+  .page-header { margin-bottom: 18px; }
+  .page-header h1 { font-size: 1.35rem; }
+  .page-header p { font-size: 0.85rem; }
+  .btn-lg { padding: 10px 20px; font-size: 0.875rem; }
+}
+
+@media (max-width: 640px) {
+  .pipeline {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin: 16px 0;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+  .pipeline-stage-link {
+    flex: 0 0 100px;
+    min-width: 100px;
+    scroll-snap-align: start;
+  }
+  .pipeline-stage { padding: 10px 6px; }
+  .pipeline-count { font-size: 1.25rem; }
+  .score-circle { width: 90px; height: 90px; border-width: 6px; }
+  .score-value { font-size: 1.65rem; }
+}
+
+
 /* Candidate Match Dashboard Custom UI */
 .progress-bar {
   width: 100%;

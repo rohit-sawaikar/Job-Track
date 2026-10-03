@@ -1,13 +1,20 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+};
+
 export const metadata: Metadata = {
   title: 'Job Track — AI-Powered Job Application Tracker',
   description: 'Track, organize, and analyze your job applications with AI-powered insights. Capture once, automate everything else.',
 };
+
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
