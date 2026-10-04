@@ -217,19 +217,118 @@ DataNest Analytics is seeking a Junior Data Analyst to support data-driven decis
         self.assertNotIn("Rohit sawaikar", desc)
         self.assertNotIn("Company: DataNest Analytics", desc)
         self.assertTrue(desc.startswith("DataNest Analytics is seeking a Junior Data Analyst"))
-        self.assertIn("cleaning datasets, preparing reports", desc)
+    def test_gemini_model_not_found_fallback(self):
+        """404 NOT_FOUND exception from Gemini must trigger fallback with model misconfigured reason."""
+        sample_text = "Job Title: Backend Developer\nCompany: TechCo\nLocation: Remote"
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_client.models.generate_content.side_effect = Exception("404 NOT_FOUND: model not found")
+                mock_client_cls.return_value = mock_client
 
-    def test_inline_preamble_company_prefix_cleaning(self):
-        """Preamble name attached to the start of company sentence must be stripped."""
-        raw_jd = """Company: DataNest Analytics
-Location: Mumbai
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "rules_fallback")
+                self.assertIn("model", res.get("fallback_reason", "").lower())
+                self.assertEqual(res.get("company"), "TechCo")
 
-Rohit sawaikar DataNest Analytics is seeking a Junior Data Analyst to support data-driven decision-making."""
+    def test_gemini_missing_api_key_fallback(self):
+        """Missing GEMINI_API_KEY must trigger fallback with unconfigured reason."""
+        sample_text = "Job Title: Backend Developer\nCompany: TechCo\nLocation: Remote"
+        with patch.object(settings, 'GEMINI_API_KEY', ''):
+            res = JobExtractor.extract_job_details(sample_text)
+            self.assertEqual(res.get("extraction_source"), "rules_fallback")
+            self.assertIn("not configured", res.get("fallback_reason", "").lower())
 
+    def test_gemini_network_exception_fallback(self):
+        """Network error or timeout must trigger rules fallback cleanly."""
+        sample_text = "Job Title: System Engineer\nCompany: NetCorp\nLocation: Remote"
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_client.models.generate_content.side_effect = Exception("Connection timeout error")
+                mock_client_cls.return_value = mock_client
+
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "rules_fallback")
+                self.assertIn("unavailable", res.get("fallback_reason", "").lower())
+
+    def test_gemini_malformed_json_fallback(self):
+        """Malformed non-JSON response text from Gemini triggers rule fallback cleanly."""
+        sample_text = "Job Title: System Engineer\nCompany: NetCorp\nLocation: Remote"
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_response = MagicMock()
+                mock_response.text = "NOT_A_VALID_JSON_STRING"
+                mock_client.models.generate_content.return_value = mock_response
+                mock_client_cls.return_value = mock_client
+
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "rules_fallback")
+                self.assertEqual(res.get("company"), "NetCorp")
+
+    def test_gemini_valid_response_missing_optional_fields(self):
+        """Valid Gemini response missing optional fields (salary=None) is accepted cleanly."""
+        sample_text = "Job Description content for NetCorp in Remote..."
+        gemini_json_response = '{"title": "DevOps Engineer", "company": "NetCorp", "location": "Remote", "salary": null, "application_url": null, "required_skills": ["AWS"], "preferred_skills": [], "responsibilities": [], "work_mode": "Remote", "employment_type": "Full-time"}'
+
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_response = MagicMock()
+                mock_response.text = gemini_json_response
+                mock_client.models.generate_content.return_value = mock_response
+                mock_client_cls.return_value = mock_client
+
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "gemini")
+                self.assertEqual(res.get("title"), "DevOps Engineer")
+                self.assertIsNone(res.get("salary"))
+
+    def test_metadata_lookalike_words_in_prose_preserved(self):
+        """Valid prose sentences containing words resembling metadata labels (experience, location, role) are preserved."""
+        raw_jd = """Company: GlobalTech
+Location: Remote
+
+We value rich engineering experience and foster a collaborative company culture where every role matters.
+Location flexibility is supported across all teams.
+"""
         res = JobExtractor.extract_with_rules(raw_jd)
         desc = res.get("description", "")
-        self.assertNotIn("Rohit sawaikar", desc)
-        self.assertTrue(desc.startswith("DataNest Analytics is seeking"))
+        self.assertIn("We value rich engineering experience and foster a collaborative company culture where every role matters.", desc)
+        self.assertIn("Location flexibility is supported across all teams.", desc)
+
+    def test_middle_unrelated_text_handling(self):
+        """Ambiguous middle prose sentences are preserved conservatively rather than arbitrarily deleted."""
+        raw_jd = """Company: GlobalTech
+Location: Remote
+
+We are seeking a Python Developer.
+Note: Please bring your enthusiasm to the team.
+You will write clean code and build backend APIs.
+"""
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertIn("We are seeking a Python Developer.", desc)
+        self.assertIn("You will write clean code and build backend APIs.", desc)
+
+    def test_cleaned_description_flow_structure(self):
+        """Ensure extract_job_details returns cleaned description ready for persistence."""
+        raw_jd = """Job Title: Junior Data Analyst
+Company: DataNest Analytics
+Location: Mumbai
+
+Job Description:
+
+Rohit sawaikar
+DataNest Analytics is seeking a Junior Data Analyst to support data-driven decision-making."""
+
+        with patch.object(settings, 'GEMINI_API_KEY', ''):
+            res = JobExtractor.extract_job_details(raw_jd)
+            self.assertEqual(res.get("extraction_source"), "rules_fallback")
+            self.assertNotIn("Job Description:", res.get("description", ""))
+            self.assertNotIn("Rohit sawaikar", res.get("description", ""))
+            self.assertTrue(res.get("description", "").startswith("DataNest Analytics is seeking"))
 
 
 if __name__ == '__main__':

@@ -111,7 +111,7 @@ export default function AddJobPage() {
         location: data.location || '',
         workMode: normWorkMode,
         salary: data.salary || '',
-        description: data.description || rawJobText,
+        description: data.description !== undefined && data.description !== null ? data.description : rawJobText,
         requirements: data.requirements || '',
         requiredSkills: Array.isArray(data.required_skills) ? data.required_skills.join(', ') : (data.required_skills || ''),
         preferredSkills: Array.isArray(data.preferred_skills) ? data.preferred_skills.join(', ') : (data.preferred_skills || ''),

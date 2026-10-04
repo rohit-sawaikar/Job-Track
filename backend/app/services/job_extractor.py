@@ -600,9 +600,6 @@ Raw Job Description:
             sanitized["extraction_source"] = "gemini"
             return sanitized
         except Exception as e:
-            if isinstance(e, ValueError):
-                raise e
-
             err_str = str(e)
             logger.error(f"[AI Extraction] Gemini job extraction exception: {err_str}", exc_info=True)
 
@@ -611,6 +608,8 @@ Raw Job Description:
                 fallback_reason = "Gemini API quota exceeded or rate limited. Extracted details using rule-based engine."
             elif "404" in err_str or "NOT_FOUND" in err_str or "model" in err_str.lower():
                 fallback_reason = "Gemini model unavailable or misconfigured. Extracted details using rule-based engine."
+            elif isinstance(e, json.JSONDecodeError):
+                fallback_reason = "Gemini returned unparseable response format. Extracted details using rule-based engine."
 
             extracted = cls.extract_with_rules(raw_job_text)
             extracted["extraction_source"] = "rules_fallback"
