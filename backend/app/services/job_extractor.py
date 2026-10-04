@@ -28,9 +28,13 @@ class JobExtractor:
 
         # 1. Title verification
         title = parsed.get("title")
+        if title:
+            # Strip label prefix if present in extracted title (e.g. "Job Title: Python Developer")
+            title = re.sub(r'^(?:\*{1,2}|_\b)?\s*(?:job\s+title|role\s+title|position|role)\s*(?:\*{1,2}|_\b)?\s*[:\-]\s*', '', str(title), flags=re.IGNORECASE).strip()
         if not title or str(title).strip().lower() in ["null", "none", "target position", "target job"]:
             lines = [l.strip() for l in text_clean.split('\n') if l.strip()]
             title = lines[0][:80] if lines else "Job Position"
+            title = re.sub(r'^(?:\*{1,2}|_\b)?\s*(?:job\s+title|role\s+title|position|role)\s*(?:\*{1,2}|_\b)?\s*[:\-]\s*', '', title, flags=re.IGNORECASE).strip()
         parsed["title"] = str(title).strip()
 
         # 2. Company verification - must be in raw_job_text
@@ -75,41 +79,65 @@ class JobExtractor:
         work_mode = parsed.get("work_mode")
         if work_mode and str(work_mode).strip().lower() not in ["null", "none"]:
             wm_lower = str(work_mode).strip().lower()
-            if "remote" in wm_lower and "remote" in text_lower:
-                parsed["work_mode"] = "Remote"
-            elif "hybrid" in wm_lower and "hybrid" in text_lower:
+            if "hybrid" in wm_lower and ("hybrid" in text_lower or "remote" in text_lower or "site" in text_lower):
                 parsed["work_mode"] = "Hybrid"
+            elif "remote" in wm_lower and "remote" in text_lower:
+                parsed["work_mode"] = "Remote"
             elif ("site" in wm_lower or "office" in wm_lower) and re.search(r'\b(?:on-site|onsite|in-office)\b', text_lower):
+                parsed["work_mode"] = "On-site"
+            elif "hybrid" in text_lower:
+                parsed["work_mode"] = "Hybrid"
+            elif "remote" in text_lower:
+                parsed["work_mode"] = "Remote"
+            elif re.search(r'\b(?:on-site|onsite|in-office)\b', text_lower):
                 parsed["work_mode"] = "On-site"
             else:
                 parsed["work_mode"] = None
         else:
-            parsed["work_mode"] = None
+            if "hybrid" in text_lower:
+                parsed["work_mode"] = "Hybrid"
+            elif "remote" in text_lower:
+                parsed["work_mode"] = "Remote"
+            elif re.search(r'\b(?:on-site|onsite|in-office)\b', text_lower):
+                parsed["work_mode"] = "On-site"
+            else:
+                parsed["work_mode"] = None
 
         # 6. Employment type verification
         employment_type = parsed.get("employment_type")
         if employment_type and str(employment_type).strip().lower() not in ["null", "none"]:
             et_lower = str(employment_type).strip().lower()
-            if "full" in et_lower and "full" in text_lower:
-                parsed["employment_type"] = "Full-time"
-            elif "part" in et_lower and "part" in text_lower:
-                parsed["employment_type"] = "Part-time"
+            if "intern" in et_lower and "intern" in text_lower:
+                parsed["employment_type"] = "Internship"
             elif "contract" in et_lower and "contract" in text_lower:
                 parsed["employment_type"] = "Contract"
-            elif "intern" in et_lower and "intern" in text_lower:
-                parsed["employment_type"] = "Internship"
+            elif "part" in et_lower and "part" in text_lower:
+                parsed["employment_type"] = "Part-time"
+            elif "full" in et_lower and "full" in text_lower:
+                parsed["employment_type"] = "Full-time"
             else:
                 parsed["employment_type"] = None
         else:
-            parsed["employment_type"] = None
+            if "intern" in text_lower:
+                parsed["employment_type"] = "Internship"
+            elif "contract" in text_lower:
+                parsed["employment_type"] = "Contract"
+            elif "part" in text_lower:
+                parsed["employment_type"] = "Part-time"
+            elif "full" in text_lower:
+                parsed["employment_type"] = "Full-time"
+            else:
+                parsed["employment_type"] = None
 
         # 7. Experience & Education
         exp = parsed.get("experience")
         if exp and str(exp).strip().lower() not in ["null", "none"]:
-            if not re.search(r'\b(?:\d+|years?|yrs?|experience|exp|senior|lead|junior|intern)\b', text_lower):
+            exp_str = str(exp).strip()
+            exp_words = [w for w in re.findall(r'\b\w+\b', exp_str.lower()) if len(w) > 2]
+            if not any(w in text_lower for w in exp_words) and not re.search(r'\b(?:\d+|years?|yrs?|experience|exp|senior|lead|junior|intern|fresher|entry)\b', text_lower):
                 parsed["experience"] = None
             else:
-                parsed["experience"] = str(exp).strip()
+                parsed["experience"] = exp_str
         else:
             parsed["experience"] = None
 
@@ -175,19 +203,8 @@ class JobExtractor:
                 "confidence": 40
             }
 
-        # Handle Insufficient Quality - Purge unsupported fields strictly
-        if quality_info["quality"] == "insufficient":
-            logger.info("[JobExtractor] Insufficient input detected. Enforcing field purge & anti-fabrication.")
-            parsed["company"] = None
-            parsed["location"] = None
-            parsed["salary"] = None
-            parsed["experience"] = None
-            parsed["education"] = None
-            parsed["application_url"] = None
-            parsed["work_mode"] = None
-            parsed["employment_type"] = None
-            parsed["responsibilities"] = []
-            parsed["preferred_skills"] = []
+        # Quality tier describes completeness. Verified extracted fields (company, location, etc.)
+        # that passed anti-fabrication verification above must NEVER be overwritten to None.
 
         parsed["analysis_quality"] = quality_info["quality"]
         parsed["quality_reasons"] = quality_info["quality_reasons"]
@@ -220,45 +237,158 @@ class JobExtractor:
             return cls.sanitize_and_verify_fields(empty_parsed, text)
 
         lines = [line.strip() for line in text.split('\n') if line.strip()]
-        title = lines[0][:100] if lines else None
 
-        salary_match = re.search(r'(\$\d+[\d,]*\s*-\s*\$\d+[\d,]*|\$\d+[\d,]*\s*/\s*yr|₹\d+[\d,]*\s*-\s*₹\d+[\d,]*)', text, re.IGNORECASE)
-        salary = salary_match.group(1) if salary_match else None
+        def find_labeled_value(patterns: List[str]) -> Optional[str]:
+            for line in lines:
+                for pat in patterns:
+                    # Supporting bold Markdown (**Label:**), underscores (_Label:_), optional whitespace, colons/dashes
+                    m = re.search(
+                        r'^(?:\*{1,2}|_\b)?\s*(?:' + pat + r')\s*(?:\*{1,2}|_\b)?\s*[:\-–—]\s*(.+)$',
+                        line,
+                        re.IGNORECASE
+                    )
+                    if m:
+                        val = m.group(1).strip()
+                        val = re.sub(r'^\*{1,2}|\*{1,2}$', '', val).strip()
+                        if val and val.lower() not in ["null", "none", "n/a", "not specified"]:
+                            return val
+            return None
 
+        # 1. Job Title
+        raw_title = find_labeled_value([r"job\s+title", r"role\s+title", r"position", r"role"])
+        if raw_title:
+            title = raw_title
+        else:
+            title = lines[0] if lines else None
+
+        if title:
+            title = re.sub(r'^(?:\*{1,2}|_\b)?\s*(?:job\s+title|role\s+title|position|role)\s*(?:\*{1,2}|_\b)?\s*[:\-–—]\s*', '', title, flags=re.IGNORECASE).strip()
+
+        # 2. Company Name
+        company = find_labeled_value([r"company\s+name", r"company", r"organization", r"employer"])
+
+        # 3. Location
+        location = find_labeled_value([r"job\s+location", r"work\s+location", r"location", r"place"])
+
+        # 4. Work Mode
+        work_mode_val = find_labeled_value([r"work\s+mode", r"work\s+arrangement", r"workplace\s+type"])
         work_mode = None
-        if re.search(r'\bremote\b', text, re.IGNORECASE):
-            work_mode = "Remote"
-        elif re.search(r'\bhybrid\b', text, re.IGNORECASE):
+        wm_search_text = (work_mode_val or text).lower()
+        if re.search(r'\bhybrid\b', wm_search_text):
             work_mode = "Hybrid"
-        elif re.search(r'\bon-site\b|\bonsite\b|\bin-office\b', text, re.IGNORECASE):
+        elif re.search(r'\bremote\b', wm_search_text):
+            work_mode = "Remote"
+        elif re.search(r'\bon-site\b|\bonsite\b|\bin-office\b', wm_search_text):
             work_mode = "On-site"
 
-        exp_match = re.search(r'\b(\d{1,2}(?:\s*-\s*\d{1,2}|\+)?\s*years?(?:\s+of)?\s+experience)\b', text, re.IGNORECASE)
-        experience = exp_match.group(1) if exp_match else None
+        # 5. Employment Type
+        emp_type_val = find_labeled_value([r"job\s+type", r"employment\s+type", r"position\s+type"])
+        employment_type = None
+        et_search_text = (emp_type_val or text).lower()
+        if "intern" in et_search_text:
+            employment_type = "Internship"
+        elif "contract" in et_search_text:
+            employment_type = "Contract"
+        elif "part" in et_search_text:
+            employment_type = "Part-time"
+        elif "full" in et_search_text:
+            employment_type = "Full-time"
 
+        # 6. Experience
+        exp_val = find_labeled_value([r"experience\s+required", r"experience", r"exp\s+required", r"experience\s+level"])
+        experience = exp_val
+        if not experience:
+            exp_match = re.search(
+                r'\b(fresher(?:\s*[\/\-]\s*0[–\-]\d+\s*years?)?|entry\s+level|0[–\-]\d+\s*years?|\d{1,2}(?:\s*-\s*\d{1,2}|\+)?\s*years?(?:\s+of)?\s+experience)\b',
+                text,
+                re.IGNORECASE
+            )
+            if exp_match:
+                experience = exp_match.group(1).strip()
+
+        # 7. Salary
+        salary_val = find_labeled_value([r"salary", r"compensation", r"pay"])
+        salary = salary_val
+        if not salary:
+            sal_match = re.search(r'(\$\d+[\d,]*\s*-\s*\$\d+[\d,]*|\$\d+[\d,]*\s*/\s*yr|₹\d+[\d,]*\s*-\s*₹\d+[\d,]*|₹\d+[\d,]*\s*/\s*(?:yr|month|mo))', text, re.IGNORECASE)
+            if sal_match:
+                salary = sal_match.group(1).strip()
+
+        # 8. Application URL
+        url_val = find_labeled_value([r"application\s+url", r"apply\s+link", r"application\s+link", r"apply\s+url"])
+        app_url = url_val
+        if not app_url:
+            url_match = re.search(r'https?://[^\s>"\']+', text)
+            if url_match:
+                app_url = url_match.group(0).strip()
+
+        # 9. Education
         edu_match = re.search(r'\b(bachelor\'?s?|master\'?s?|phd|degree|b\.s\.|b\.tech|b\.e\.|bca)\b(?:\s+in\s+[\w\s]+)?', text, re.IGNORECASE)
         education = edu_match.group(0) if edu_match else None
 
+        # 10. Section-Aware Skills and Responsibilities Parsing
+        req_skills: List[str] = []
+        pref_skills: List[str] = []
+        responsibilities: List[str] = []
+
         common_tech = ["Python", "JavaScript", "TypeScript", "React", "Next.js", "Node.js", "FastAPI", 
                        "Django", "Flask", "PostgreSQL", "MySQL", "MongoDB", "AWS", "Docker", "Kubernetes", 
-                       "GraphQL", "Tailwind", "SQL", "Git", "REST API", "CI/CD", "Linux", "Tkinter", "PyQt6"]
-        found_skills = [tech for tech in common_tech if re.search(r'\b' + re.escape(tech) + r'\b', text, re.IGNORECASE)]
+                       "GraphQL", "Tailwind", "SQL", "Git", "REST API", "CI/CD", "Linux", "Tkinter", "PyQt6", "C++", "Java"]
+
+        current_section = "general"
+
+        for line in text.split('\n'):
+            line_str = line.strip()
+            if not line_str:
+                continue
+            line_lower = line_str.lower()
+
+            if any(h in line_lower for h in ["preferred qualification", "preferred skills", "preferred requirements", "nice to have", "plus", "bonus"]):
+                current_section = "preferred"
+                continue
+            elif any(h in line_lower for h in ["required technical skills", "required skills", "requirements", "qualifications", "must have", "minimum qualifications"]):
+                current_section = "required"
+                continue
+            elif any(h in line_lower for h in ["responsibilities", "key responsibilities", "duties", "what you'll do", "role overview"]):
+                current_section = "responsibilities"
+                continue
+
+            if current_section == "responsibilities":
+                if re.match(r'^[#\*•\-\d\.]+\s*', line_str):
+                    resp_text = re.sub(r'^[#\*•\-\d\.]+\s*', '', line_str).strip()
+                    if len(resp_text) > 10:
+                        responsibilities.append(resp_text)
+
+            for tech in common_tech:
+                if re.search(r'\b' + re.escape(tech) + r'\b', line_str, re.IGNORECASE):
+                    if current_section == "preferred":
+                        if tech not in pref_skills:
+                            pref_skills.append(tech)
+                    else:
+                        if tech not in req_skills:
+                            req_skills.append(tech)
+
+        if not req_skills and not pref_skills:
+            for tech in common_tech:
+                if re.search(r'\b' + re.escape(tech) + r'\b', text, re.IGNORECASE):
+                    if tech not in req_skills:
+                        req_skills.append(tech)
 
         parsed = {
             "title": title,
-            "company": None,
-            "location": None,
+            "company": company,
+            "location": location,
             "work_mode": work_mode,
-            "employment_type": None,
+            "employment_type": employment_type,
             "salary": salary,
             "experience": experience,
-            "description": text[:3000],
-            "required_skills": found_skills,
-            "preferred_skills": [],
-            "responsibilities": [],
-            "technologies": found_skills,
+            "description": text[:5000],
+            "required_skills": req_skills,
+            "preferred_skills": pref_skills,
+            "responsibilities": responsibilities[:10],
+            "technologies": list(set(req_skills + pref_skills)),
             "education": education,
-            "application_url": None
+            "application_url": app_url
         }
         return cls.sanitize_and_verify_fields(parsed, text)
 
@@ -272,10 +402,15 @@ class JobExtractor:
 
         if not settings.GEMINI_API_KEY:
             logger.warning("[AI Extraction] GEMINI_API_KEY not configured, using rule-based extraction fallback")
-            return cls.extract_with_rules(raw_job_text)
+            extracted = cls.extract_with_rules(raw_job_text)
+            extracted["extraction_source"] = "rules_fallback"
+            extracted["fallback_reason"] = "Gemini API key is not configured."
+            return extracted
+
+        model_name = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash"
 
         try:
-            logger.info("[AI Extraction] Calling Gemini")
+            logger.info(f"[AI Extraction] Calling Gemini with model {model_name}")
             client = genai.Client(api_key=settings.GEMINI_API_KEY)
             prompt = f"""Extract job listing details from the following raw job description.
 CRITICAL INSTRUCTION: If a field is NOT explicitly mentioned or present in the raw text (e.g. company, location, salary, experience, education, application_url), set it to null. Do NOT invent or guess placeholder values.
@@ -287,7 +422,7 @@ Return ONLY a valid JSON object matching this schema without markdown code block
   "company": "Company Name or null",
   "location": "Location or null",
   "work_mode": "Remote / Hybrid / On-site or null",
-  "employment_type": "Full-time / Part-time / Contract or null",
+  "employment_type": "Full-time / Part-time / Contract / Internship or null",
   "salary": "Salary range or null",
   "experience": "Years or level of experience required or null",
   "description": "Cleaned main job summary",
@@ -304,25 +439,39 @@ Raw Job Description:
 """
 
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model=model_name,
                 contents=prompt,
             )
             logger.info("[AI Extraction] Gemini response received")
 
             response_text = response.text.strip()
-            
+
             if response_text.startswith("```"):
                 response_text = re.sub(r'^```(?:json)?\s*', '', response_text)
                 response_text = re.sub(r'\s*```$', '', response_text)
-                
+
             parsed = json.loads(response_text)
             logger.info("[AI Extraction] Parsed structured response")
-            return cls.sanitize_and_verify_fields(parsed, raw_job_text)
+            sanitized = cls.sanitize_and_verify_fields(parsed, raw_job_text)
+            sanitized["extraction_source"] = "gemini"
+            return sanitized
         except Exception as e:
             if isinstance(e, ValueError):
                 raise e
-            logger.error(f"[AI Extraction] Gemini job extraction exception: {e}", exc_info=True)
-            return cls.extract_with_rules(raw_job_text)
+
+            err_str = str(e)
+            logger.error(f"[AI Extraction] Gemini job extraction exception: {err_str}", exc_info=True)
+
+            fallback_reason = "AI service unavailable. Extracted details using rule-based engine."
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                fallback_reason = "Gemini API quota exceeded or rate limited. Extracted details using rule-based engine."
+            elif "404" in err_str or "NOT_FOUND" in err_str or "model" in err_str.lower():
+                fallback_reason = "Gemini model unavailable or misconfigured. Extracted details using rule-based engine."
+
+            extracted = cls.extract_with_rules(raw_job_text)
+            extracted["extraction_source"] = "rules_fallback"
+            extracted["fallback_reason"] = fallback_reason
+            return extracted
 
 
 

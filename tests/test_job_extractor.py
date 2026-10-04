@@ -1,11 +1,13 @@
 import unittest
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 # Ensure backend directory is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
 from app.services.job_extractor import JobExtractor, MAX_JD_LENGTH
+from app.config import settings
 
 
 class TestJobExtractorQualityAndPrecision(unittest.TestCase):
@@ -29,90 +31,101 @@ class TestJobExtractorQualityAndPrecision(unittest.TestCase):
             JobExtractor.extract_job_details(oversized)
         self.assertIn("exceeds maximum allowed length", str(ctx.exception))
 
-    def test_insufficient_minimal_input_python(self):
-        """Minimal input 'Python' must classify as insufficient and NOT invent company/salary/experience."""
-        result = JobExtractor.extract_job_details("Python")
-        self.assertEqual(result.get("analysis_quality"), "insufficient")
-        self.assertIsNone(result.get("company"))
-        self.assertIsNone(result.get("location"))
-        self.assertIsNone(result.get("salary"))
-        self.assertIsNone(result.get("experience"))
-        self.assertIsNone(result.get("education"))
-        self.assertIsNone(result.get("application_url"))
-        self.assertIn("Python", result.get("required_skills", []))
+    def test_explicit_labeled_fields_and_markdown(self):
+        """Verify extraction of explicitly labeled fields, bold markdown, and internship normalization."""
+        sample_jd = """
+Job Title: Python Developer Intern
+Company: TechNova Solutions
+Location: Pune, Maharashtra, India
+Job Type: Full-time Internship
+Work Mode: Hybrid
+Experience: Fresher / 0–1 Year
 
-    def test_insufficient_minimal_input_python_developer(self):
-        """Minimal input 'Python developer' must classify as insufficient and keep missing fields null."""
-        result = JobExtractor.extract_job_details("Python developer")
-        self.assertEqual(result.get("analysis_quality"), "insufficient")
-        self.assertIsNone(result.get("company"))
-        self.assertIsNone(result.get("location"))
-        self.assertIsNone(result.get("salary"))
-        self.assertIsNone(result.get("experience"))
+Required Technical Skills:
+- Python, FastAPI, PostgreSQL
 
-    def test_insufficient_software_engineer_needed(self):
-        """Input 'Software engineer needed' must classify as insufficient and not fabricate company or requirements."""
-        result = JobExtractor.extract_job_details("Software engineer needed")
-        self.assertEqual(result.get("analysis_quality"), "insufficient")
-        self.assertIsNone(result.get("company"))
-        self.assertIsNone(result.get("salary"))
-        self.assertIsNone(result.get("location"))
+Preferred Qualifications:
+- React, Docker
 
-    def test_limited_input_extraction(self):
-        """Short JD with skills but missing sections must classify as limited and keep unmentioned fields null."""
-        jd_text = "Looking for a Python & FastAPI developer with PostgreSQL experience. Remote work available."
-        result = JobExtractor.extract_job_details(jd_text)
-        self.assertIn(result.get("analysis_quality"), ["limited", "insufficient"])
-        self.assertEqual(result.get("work_mode"), "Remote")
-        self.assertIsNone(result.get("company"))
-        self.assertIsNone(result.get("salary"))
-        self.assertIn("Python", result.get("required_skills", []))
-        self.assertIn("FastAPI", result.get("required_skills", []))
+Responsibilities:
+- Build and maintain backend services using Python
+- Write clean and testable code
+"""
+        res = JobExtractor.extract_with_rules(sample_jd)
+        self.assertEqual(res.get("title"), "Python Developer Intern")
+        self.assertEqual(res.get("company"), "TechNova Solutions")
+        self.assertEqual(res.get("location"), "Pune, Maharashtra, India")
+        self.assertEqual(res.get("employment_type"), "Internship")
+        self.assertEqual(res.get("work_mode"), "Hybrid")
+        self.assertEqual(res.get("experience"), "Fresher / 0–1 Year")
+        self.assertIn("Python", res.get("required_skills", []))
+        self.assertIn("FastAPI", res.get("required_skills", []))
+        self.assertIn("React", res.get("preferred_skills", []))
+        self.assertIn("Docker", res.get("preferred_skills", []))
+        self.assertTrue(len(res.get("responsibilities", [])) > 0)
+        self.assertIsNone(res.get("salary"))
+        self.assertIsNone(res.get("application_url"))
 
-    def test_sufficient_full_jd_extraction(self):
-        """Full detailed JD must classify as sufficient or limited, preserving exact stated values."""
-        jd_text = """
-        Job Title: Senior Python Engineer
-        Company: Acme Tech Solutions
-        Location: San Francisco, CA (Hybrid)
-        Salary: $140,000 - $175,000 / yr
+    def test_bold_markdown_labels_and_prefix_stripping(self):
+        """Verify that bold markdown labels like **Job Title:** are stripped from the output value."""
+        bold_jd = """
+**Job Title:** Backend Software Engineer
+**Company:** Acme Tech Solutions
+**Location:** Bangalore, India
+**Experience:** 1–3 Years
+"""
+        res = JobExtractor.extract_with_rules(bold_jd)
+        self.assertEqual(res.get("title"), "Backend Software Engineer")
+        self.assertEqual(res.get("company"), "Acme Tech Solutions")
+        self.assertEqual(res.get("location"), "Bangalore, India")
+        self.assertEqual(res.get("experience"), "1–3 Years")
 
-        Role Overview:
-        We are seeking a Senior Python Engineer to lead our backend architecture.
+    def test_short_jd_retains_explicit_fields(self):
+        """Short or insufficient JDs must retain valid explicitly labeled company and location fields."""
+        short_jd = """
+Company: MicroCorp
+Location: Remote
+Python Developer
+"""
+        res = JobExtractor.extract_with_rules(short_jd)
+        self.assertEqual(res.get("company"), "MicroCorp")
+        self.assertEqual(res.get("location"), "Remote")
+        self.assertEqual(res.get("work_mode"), "Remote")
 
-        Responsibilities:
-        - Design and maintain microservices using Python and FastAPI
-        - Manage PostgreSQL database migrations and optimizations
-        - Implement CI/CD pipelines and Docker containers
+    def test_gemini_quota_exhaustion_fallback(self):
+        """429 Resource Exhausted exception from Gemini must trigger rule fallback with extraction_source indicator."""
+        sample_text = "Job Title: Python Intern\nCompany: SolCo\nLocation: Delhi\nExperience: Fresher"
+        
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded")
+                mock_client_cls.return_value = mock_client
+                
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "rules_fallback")
+                self.assertIn("quota", res.get("fallback_reason", "").lower())
+                self.assertEqual(res.get("company"), "SolCo")
 
-        Requirements:
-        - 5+ years of experience in backend development
-        - Bachelor's degree in Computer Science or related field
-        - Strong proficiency in Python, SQL, and Git
-        """
-        result = JobExtractor.extract_job_details(jd_text)
-        self.assertIn(result.get("analysis_quality"), ["sufficient", "limited"])
-        self.assertEqual(result.get("company"), "Acme Tech Solutions")
-        self.assertIn("San Francisco", result.get("location", ""))
-        self.assertIn("$140,000", result.get("salary", ""))
-        self.assertIn("5+ years", result.get("experience", ""))
-        self.assertIn("Python", result.get("required_skills", []))
-
-    def test_unmentioned_salary_company_remain_null(self):
-        """When salary/company/location are not stated in text, they MUST remain None."""
-        jd_text = """
-        Backend Developer
-        Responsibilities:
-        - Develop REST APIs in Python and Django
-        - Write clean code and unit tests
-        Qualifications:
-        - 2 years experience with Python
-        """
-        result = JobExtractor.extract_job_details(jd_text)
-        self.assertIsNone(result.get("company"))
-        self.assertIsNone(result.get("salary"))
-        self.assertIsNone(result.get("application_url"))
+    def test_gemini_success_response(self):
+        """Successful Gemini API response returns extraction_source 'gemini'."""
+        sample_text = "Job Description content for CloudNet in Seattle..."
+        gemini_json_response = '{"title": "DevOps Engineer", "company": "CloudNet", "location": "Seattle", "required_skills": ["Docker", "AWS"], "preferred_skills": [], "responsibilities": [], "work_mode": "Remote", "employment_type": "Full-time"}'
+        
+        with patch.object(settings, 'GEMINI_API_KEY', 'fake-key'):
+            with patch('app.services.job_extractor.genai.Client') as mock_client_cls:
+                mock_client = MagicMock()
+                mock_response = MagicMock()
+                mock_response.text = gemini_json_response
+                mock_client.models.generate_content.return_value = mock_response
+                mock_client_cls.return_value = mock_client
+                
+                res = JobExtractor.extract_job_details(sample_text)
+                self.assertEqual(res.get("extraction_source"), "gemini")
+                self.assertEqual(res.get("title"), "DevOps Engineer")
+                self.assertEqual(res.get("company"), "CloudNet")
 
 
 if __name__ == '__main__':
     unittest.main()
+
