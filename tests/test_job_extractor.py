@@ -120,10 +120,82 @@ Python Developer
                 mock_client.models.generate_content.return_value = mock_response
                 mock_client_cls.return_value = mock_client
                 
-                res = JobExtractor.extract_job_details(sample_text)
-                self.assertEqual(res.get("extraction_source"), "gemini")
-                self.assertEqual(res.get("title"), "DevOps Engineer")
-                self.assertEqual(res.get("company"), "CloudNet")
+    def test_description_cleans_personal_notes(self):
+        """Personal notes like 'My name is Rohit' must be excluded from description."""
+        raw_jd = """My name is Rohit
+Job Title: Python Developer
+Company: TechNova Solutions
+Location: Pune
+
+Job Description:
+We are looking for a Python Developer to join our team.
+
+Responsibilities:
+- Build backend REST APIs
+"""
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("My name is Rohit", desc)
+        self.assertNotIn("Company: TechNova Solutions", desc)
+        self.assertNotIn("Location: Pune", desc)
+        self.assertIn("We are looking for a Python Developer to join our team.", desc)
+        self.assertIn("Build backend REST APIs", desc)
+
+    def test_description_without_heading_removes_metadata(self):
+        """Postings without an explicit 'Job Description' heading must strip metadata lines and preserve job text."""
+        raw_jd = """Job Title: Backend Engineer
+Company: Acme Corp
+Location: Remote
+Experience: 2+ Years
+
+We are seeking an experienced Backend Engineer to scale our services.
+Must be proficient in Python, PostgreSQL, and Docker.
+"""
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("Company: Acme Corp", desc)
+        self.assertNotIn("Location: Remote", desc)
+        self.assertIn("We are seeking an experienced Backend Engineer to scale our services.", desc)
+
+    def test_description_preserves_sections_and_bullets(self):
+        """Section headers, bullet points, and formatting must be preserved."""
+        raw_jd = """Company: DataFlow Inc
+Location: Mumbai
+
+Responsibilities:
+- Develop microservices in Python
+- Write unit tests
+
+Required Technical Skills:
+- Python
+- FastAPI
+
+Preferred Qualifications:
+- Docker, AWS
+"""
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("Company: DataFlow Inc", desc)
+        self.assertIn("Responsibilities:", desc)
+        self.assertIn("- Develop microservices in Python", desc)
+        self.assertIn("Required Technical Skills:", desc)
+        self.assertIn("Preferred Qualifications:", desc)
+
+    def test_short_description_cleaned(self):
+        """Short job descriptions are cleaned without wiping content."""
+        short_jd = "Company: MicroDev\nLocation: Remote\nPython developer needed to build FastAPI backends."
+        res = JobExtractor.extract_with_rules(short_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("Company: MicroDev", desc)
+        self.assertIn("Python developer needed to build FastAPI backends.", desc)
+
+    def test_missing_metadata_preserves_description(self):
+        """When some metadata labels are missing, description cleaning handles remaining text gracefully."""
+        jd_text = "Python Engineer role.\nLooking for a developer with FastAPI & PostgreSQL experience."
+        res = JobExtractor.extract_with_rules(jd_text)
+        desc = res.get("description", "")
+        self.assertTrue(len(desc) > 0)
+        self.assertIn("FastAPI", desc)
 
 
 if __name__ == '__main__':

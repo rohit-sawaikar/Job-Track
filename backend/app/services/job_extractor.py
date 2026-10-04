@@ -189,7 +189,14 @@ class JobExtractor:
         parsed["preferred_skills"] = clean_pref_skills
         parsed["technologies"] = list(set(clean_req_skills + clean_pref_skills))
 
-        # 9. Classify Quality via MatchingEngine
+        # 9. Clean Job Description (strip personal notes & metadata labels)
+        raw_desc = parsed.get("description")
+        cleaned_desc = cls.clean_job_description(str(raw_desc) if raw_desc else raw_job_text, parsed)
+        if not cleaned_desc:
+            cleaned_desc = cls.clean_job_description(raw_job_text, parsed)
+        parsed["description"] = cleaned_desc
+
+        # 10. Classify Quality via MatchingEngine
         try:
             canonical_reqs = MatchingEngine.extract_canonical_requirements(text_clean)
             quality_info = MatchingEngine.classify_jd_quality(text_clean, parsed["title"], canonical_reqs)
@@ -213,6 +220,72 @@ class JobExtractor:
         parsed["analysis_confidence"] = quality_info["confidence"]
 
         return parsed
+
+    @classmethod
+    def clean_job_description(cls, raw_text: str, extracted: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Cleans raw job description text by removing header metadata labels,
+        prefixed personal notes, and redundant key-value pairs while preserving
+        substantive job content, sections, bullet points, and formatting.
+        """
+        if not raw_text or not raw_text.strip():
+            return ""
+
+        lines = raw_text.split('\n')
+        cleaned_lines = []
+
+        metadata_label_patterns = [
+            r'job\s+title', r'role\s+title', r'position', r'role',
+            r'company\s+name', r'company', r'organization', r'employer',
+            r'job\s+location', r'work\s+location', r'location', r'place',
+            r'work\s+mode', r'work\s+arrangement', r'workplace\s+type',
+            r'job\s+type', r'employment\s+type', r'position\s+type',
+            r'experience\s+required', r'experience', r'exp\s+required', r'experience\s+level',
+            r'salary', r'compensation', r'pay',
+            r'application\s+url', r'apply\s+link', r'application\s+link', r'apply\s+url'
+        ]
+
+        metadata_regex = re.compile(
+            r'^(?:\*{1,2}|_\b)?\s*(?:' + '|'.join(metadata_label_patterns) + r')\s*(?:\*{1,2}|_\b)?\s*[:\-–—]\s*.*$',
+            re.IGNORECASE
+        )
+
+        personal_note_regex = re.compile(
+            r'^(?:hi|hello|hey|my name is|i am|this is|note:|\bplease note\b)\b.*$',
+            re.IGNORECASE
+        )
+
+        skipping_intro = True
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                cleaned_lines.append("")
+                continue
+
+            # 1. Strip metadata label lines (e.g. Company: TechNova Solutions)
+            if metadata_regex.match(stripped):
+                continue
+
+            # 2. Strip personal note greetings at the top of the description
+            if skipping_intro:
+                if personal_note_regex.match(stripped):
+                    continue
+                # Once we encounter real content or section header, stop skipping intro
+                skipping_intro = False
+
+            cleaned_lines.append(line)
+
+        # Collapse excessive blank lines
+        result_text = "\n".join(cleaned_lines).strip()
+        result_text = re.sub(r'\n{3,}', '\n\n', result_text)
+
+        # Fallback safety: if cleaning wiped everything, return original lines without metadata regex matches
+        if not result_text:
+            non_meta_lines = [l for l in lines if not metadata_regex.match(l.strip())]
+            result_text = "\n".join(non_meta_lines).strip()
+
+        return result_text
 
     @classmethod
     def extract_with_rules(cls, text: str) -> Dict[str, Any]:
@@ -382,7 +455,7 @@ class JobExtractor:
             "employment_type": employment_type,
             "salary": salary,
             "experience": experience,
-            "description": text[:5000],
+            "description": cls.clean_job_description(text, None),
             "required_skills": req_skills,
             "preferred_skills": pref_skills,
             "responsibilities": responsibilities[:10],
