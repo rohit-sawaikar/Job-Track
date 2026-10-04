@@ -225,15 +225,16 @@ class JobExtractor:
     def clean_job_description(cls, raw_text: str, extracted: Optional[Dict[str, Any]] = None) -> str:
         """
         Cleans raw job description text by removing header metadata labels,
-        prefixed personal notes, and redundant key-value pairs while preserving
-        substantive job content, sections, bullet points, and formatting.
+        redundant section headers (e.g. 'Job Description:'), personal notes/intro
+        preambles, and redundant key-value pairs while preserving substantive
+        job content, sections, bullet points, and formatting.
         """
         if not raw_text or not raw_text.strip():
             return ""
 
         lines = raw_text.split('\n')
-        cleaned_lines = []
 
+        # 1. Metadata Label Patterns (e.g. Job Title:, Company:, Location:, Work Mode:, etc.)
         metadata_label_patterns = [
             r'job\s+title', r'role\s+title', r'position', r'role',
             r'company\s+name', r'company', r'organization', r'employer',
@@ -242,7 +243,8 @@ class JobExtractor:
             r'job\s+type', r'employment\s+type', r'position\s+type',
             r'experience\s+required', r'experience', r'exp\s+required', r'experience\s+level',
             r'salary', r'compensation', r'pay',
-            r'application\s+url', r'apply\s+link', r'application\s+link', r'apply\s+url'
+            r'application\s+url', r'apply\s+link', r'application\s+link', r'apply\s+url',
+            r'education', r'education\s+required'
         ]
 
         metadata_regex = re.compile(
@@ -250,12 +252,41 @@ class JobExtractor:
             re.IGNORECASE
         )
 
+        # 2. Redundant Top-Level Section Header Patterns (e.g. 'Job Description:', 'About the Role:')
+        header_pattern = re.compile(
+            r'^(?:\*{1,2}|_\b)?\s*(?:job\s+description|about\s+the\s+role|role\s+overview|job\s+overview|position\s+overview|summary|description|about\s+the\s+company|about\s+us)\s*(?:\*{1,2}|_\b)?\s*[:\-–—]?\s*$',
+            re.IGNORECASE
+        )
+
+        # 3. Explicit Greeting/Personal Note Regex
         personal_note_regex = re.compile(
             r'^(?:hi|hello|hey|my name is|i am|this is|note:|\bplease note\b)\b.*$',
             re.IGNORECASE
         )
 
-        skipping_intro = True
+        # 4. Common Job Prose Keywords
+        job_prose_keywords = re.compile(
+            r'\b(?:seeking|looking|hiring|responsible|responsibilities|requirements|qualifications|candidate|candidates|role|team|build|develop|manage|join|create|design|support|include|includes|preferred|experience|skills|ability|must|will|opportunity|duties|work|analyst|engineer|developer|specialist|manager|intern|full-time|part-time|hybrid|remote|onsite|client|company|business)\b',
+            re.IGNORECASE
+        )
+
+        # 5. Recognized Substantive Section Headers (e.g. Responsibilities:, Requirements:, Skills:)
+        substantive_section_regex = re.compile(
+            r'^(?:\*{1,2}|_\b)?\s*(?:responsibilities|key\s+responsibilities|requirements|technical\s+skills|required\s+skills|preferred\s+qualifications|qualifications|what\s+you\'ll\s+do|duties|what\s+we\s+are\s+looking\s+for)\s*(?:\*{1,2}|_\b)?\s*[:\-–—]?\s*$',
+            re.IGNORECASE
+        )
+
+        # Extract company and title strings for prefix matching if available
+        comp_str = ""
+        title_str = ""
+        if extracted:
+            if extracted.get("company"):
+                comp_str = str(extracted["company"]).strip()
+            if extracted.get("title"):
+                title_str = str(extracted["title"]).strip().lower()
+
+        cleaned_lines = []
+        in_preamble = True  # Skipping top metadata / preamble / non-prose lines
 
         for line in lines:
             stripped = line.strip()
@@ -263,16 +294,56 @@ class JobExtractor:
                 cleaned_lines.append("")
                 continue
 
-            # 1. Strip metadata label lines (e.g. Company: TechNova Solutions)
+            # Strip exact match to job title header line if redundant
+            if title_str and stripped.lower() == title_str:
+                continue
+
+            # Strip metadata lines (e.g., Company: DataNest Analytics)
             if metadata_regex.match(stripped):
                 continue
 
-            # 2. Strip personal note greetings at the top of the description
-            if skipping_intro:
+            # Strip redundant 'Job Description:' or 'About the Role:' header lines
+            if header_pattern.match(stripped):
+                continue
+
+            if in_preamble:
+                # Check 1: Explicit greeting / personal note
                 if personal_note_regex.match(stripped):
                     continue
-                # Once we encounter real content or section header, stop skipping intro
-                skipping_intro = False
+
+                # Check 2: Recognized substantive section header (e.g. Responsibilities:) -> Stop preamble
+                if substantive_section_regex.match(stripped):
+                    in_preamble = False
+                    cleaned_lines.append(line)
+                    continue
+
+                # Check 3: Bullet points -> Stop preamble
+                if re.match(r'^[#\*•\-\d\.]+\s*', stripped):
+                    in_preamble = False
+                    cleaned_lines.append(line)
+                    continue
+
+                # Check 4: Inline company prefix check (e.g. "Rohit sawaikar DataNest Analytics is seeking...")
+                if comp_str and comp_str.lower() in stripped.lower():
+                    comp_idx = stripped.lower().find(comp_str.lower())
+                    if comp_idx > 0 and comp_idx < 60:
+                        prefix = stripped[:comp_idx].strip()
+                        if not job_prose_keywords.search(prefix):
+                            # Strip the non-prose prefix before company name
+                            stripped = stripped[comp_idx:].strip()
+                            line = stripped
+
+                # Check 5: Check if standalone non-prose preamble line (e.g., "Rohit sawaikar")
+                is_short_line = len(stripped) < 60
+                has_sentence_end = stripped[-1] in ".!?:;"
+                has_job_keywords = bool(job_prose_keywords.search(stripped))
+
+                if is_short_line and not has_sentence_end and not has_job_keywords:
+                    # Non-prose intro preamble line (e.g. "Rohit sawaikar") -> Skip!
+                    continue
+
+                # Once we reach genuine job prose paragraph, stop skipping preamble
+                in_preamble = False
 
             cleaned_lines.append(line)
 
@@ -280,9 +351,9 @@ class JobExtractor:
         result_text = "\n".join(cleaned_lines).strip()
         result_text = re.sub(r'\n{3,}', '\n\n', result_text)
 
-        # Fallback safety: if cleaning wiped everything, return original lines without metadata regex matches
+        # Safety fallback: if cleaning wiped all text, return non-metadata lines
         if not result_text:
-            non_meta_lines = [l for l in lines if not metadata_regex.match(l.strip())]
+            non_meta_lines = [l for l in lines if not metadata_regex.match(l.strip()) and not header_pattern.match(l.strip())]
             result_text = "\n".join(non_meta_lines).strip()
 
         return result_text

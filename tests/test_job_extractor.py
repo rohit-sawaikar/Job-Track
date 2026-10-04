@@ -197,6 +197,40 @@ Preferred Qualifications:
         self.assertTrue(len(desc) > 0)
         self.assertIn("FastAPI", desc)
 
+    def test_exact_user_reported_job_description_cleaning_failure(self):
+        """Regression test for user-reported failure: Job Description header and standalone name preamble must be stripped."""
+        raw_jd = """Job Title: Junior Data Analyst
+Company: DataNest Analytics
+Location: Mumbai, India
+Work Mode: Remote
+Job Type: Full-time
+Experience: 0–1 Year
+
+Job Description:
+
+Rohit sawaikar
+DataNest Analytics is seeking a Junior Data Analyst to support data-driven decision-making. Candidates should have basic knowledge of Python, SQL, Excel, and data visualization tools. Responsibilities include cleaning datasets, preparing reports, identifying trends, and assisting senior analysts."""
+
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("Job Description:", desc)
+        self.assertNotIn("Rohit sawaikar", desc)
+        self.assertNotIn("Company: DataNest Analytics", desc)
+        self.assertTrue(desc.startswith("DataNest Analytics is seeking a Junior Data Analyst"))
+        self.assertIn("cleaning datasets, preparing reports", desc)
+
+    def test_inline_preamble_company_prefix_cleaning(self):
+        """Preamble name attached to the start of company sentence must be stripped."""
+        raw_jd = """Company: DataNest Analytics
+Location: Mumbai
+
+Rohit sawaikar DataNest Analytics is seeking a Junior Data Analyst to support data-driven decision-making."""
+
+        res = JobExtractor.extract_with_rules(raw_jd)
+        desc = res.get("description", "")
+        self.assertNotIn("Rohit sawaikar", desc)
+        self.assertTrue(desc.startswith("DataNest Analytics is seeking"))
+
 
 if __name__ == '__main__':
     unittest.main()
