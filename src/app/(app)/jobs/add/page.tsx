@@ -49,8 +49,6 @@ export default function AddJobPage() {
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState(false);
   const [qualityInfo, setQualityInfo] = useState<QualityInfo | null>(null);
-  const [extractionSource, setExtractionSource] = useState<'gemini' | 'rules_fallback' | null>(null);
-  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [duplicateMatch, setDuplicateMatch] = useState<ExistingDuplicate | null>(null);
   const [bypassDuplicateCheck, setBypassDuplicateCheck] = useState(false);
@@ -72,19 +70,12 @@ export default function AddJobPage() {
     setExtracting(true);
     setExtractError(false);
     setQualityInfo(null);
-    setExtractionSource(null);
-    setFallbackReason(null);
 
     try {
       const data = await apiClient.extractJob(rawJobText);
 
       // Guard against stale asynchronous responses
       if (currentSeq !== requestSeqRef.current) return;
-
-      // Track extraction source & fallback reason
-      const src = data.extraction_source || (data.extractionSource as 'gemini' | 'rules_fallback') || 'gemini';
-      setExtractionSource(src);
-      setFallbackReason(data.fallback_reason || data.fallbackReason || null);
 
       // Normalize work mode to match option values
       let normWorkMode = form.workMode || 'Remote';
@@ -133,9 +124,7 @@ export default function AddJobPage() {
       });
 
       setIsAiExtracted(true);
-      if (src === 'rules_fallback') {
-        toast('Extracted details using rule-based engine.', { icon: 'ℹ️' });
-      } else if (qTier === 'insufficient') {
+      if (qTier === 'insufficient') {
         toast.error('Job description is minimal. Basic details extracted; please fill missing fields manually.');
       } else if (qTier === 'limited') {
         toast('Limited job details extracted. Some fields were missing from description.', { icon: 'ℹ️' });
@@ -334,17 +323,14 @@ export default function AddJobPage() {
         />
       </div>
 
-      {/* Rule-Based Fallback Notice Banner */}
-      {extractionSource === 'rules_fallback' && (
-        <div className="card" style={{ marginBottom: 24, backgroundColor: 'rgba(245, 158, 11, 0.08)', borderColor: '#f59e0b' }}>
+      {/* Neutral Review Reminder Banner */}
+      {isAiExtracted && (
+        <div className="card" style={{ marginBottom: 24, backgroundColor: 'rgba(255, 255, 255, 0.03)', borderColor: 'var(--border-color)' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <Info color="#f59e0b" size={24} style={{ flexShrink: 0, marginTop: 2 }} />
+            <Info color="var(--text-secondary)" size={20} style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#f59e0b', marginBottom: 4 }}>
-                Rule-Based Fallback Applied
-              </h3>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-primary)', marginBottom: 0 }}>
-                {fallbackReason || 'Job details were extracted using basic rules because AI extraction was temporarily unavailable.'}
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-primary)', margin: 0, lineHeight: 1.5 }}>
+                Please review the extracted information before saving. AI-generated details may occasionally be incomplete or inaccurate. You can edit any field to correct missing or incorrect information.
               </p>
             </div>
           </div>
